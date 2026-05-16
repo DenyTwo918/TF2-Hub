@@ -1893,6 +1893,7 @@ async function handle(req, res) {
     return jsonReply(res, 200, {
       version: VERSION,
       uptime_seconds: Math.round(process.uptime()),
+      key_price_ref: keyPriceRef,
       ...appState,
       recent_offers: readRecentOffers(20),
     });
