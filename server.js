@@ -10,7 +10,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1889,7 +1889,7 @@ async function handle(req, res) {
   }
 
   if (req.method === 'POST' && pathname === '/api/sync') {
-    syncListings().catch(() => {});
+    guardedSync(syncInventoryListings, 'manual-sync').catch(() => {});
     return jsonReply(res, 200, { ok: true });
   }
 
