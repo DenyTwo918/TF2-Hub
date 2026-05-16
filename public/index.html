@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TF2 Trading Hub</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #111827; color: #e5e7eb; padding: 20px; font-size: 14px; }
+    h1 { font-size: 1.4rem; color: #60a5fa; margin-bottom: 20px; font-weight: 600; }
+    h2 { font-size: 0.82rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; font-weight: 600; }
+    .card { background: #1f2937; border: 1px solid #374151; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+    .grid { display: flex; gap: 28px; flex-wrap: wrap; }
+    .stat { min-width: 100px; }
+    .stat-label { font-size: 0.7rem; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat-value { font-size: 1rem; font-weight: 600; }
+    .ok { color: #34d399; }
+    .warn { color: #fbbf24; }
+    .err { color: #f87171; }
+    .muted { color: #6b7280; }
+    .dim { color: #9ca3af; font-size: 0.9rem; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .dot-online { background: #34d399; box-shadow: 0 0 6px #34d399; }
+    .dot-connecting { background: #fbbf24; }
+    .dot-offline { background: #6b7280; }
+    .dot-error { background: #f87171; }
+    .error-box { background: #3b1919; border: 1px solid #7f1d1d; border-radius: 6px; padding: 10px 14px; margin-top: 12px; color: #fca5a5; font-size: 0.85rem; word-break: break-word; }
+    .btn { display: inline-flex; align-items: center; background: #3b82f6; color: #fff; border: none; padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600; margin-top: 14px; }
+    .btn:hover { background: #2563eb; }
+    .btn:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
+    .btn-danger { background: #ef4444; margin-left: 8px; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-sm { padding: 3px 10px; font-size: 0.75rem; margin-top: 0; }
+    .sync-msg { display: inline-block; margin-left: 10px; font-size: 0.8rem; color: #9ca3af; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { text-align: left; padding: 7px 10px; border-bottom: 1px solid #374151; color: #9ca3af; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    tbody td { padding: 8px 10px; border-bottom: 1px solid #1f2937; vertical-align: middle; font-size: 0.85rem; }
+    tbody tr:hover td { background: #263144; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.68rem; font-weight: 700; white-space: nowrap; }
+    .badge-accept { background: #14532d; color: #6ee7b7; }
+    .badge-decline { background: #7f1d1d; color: #fca5a5; }
+    .badge-hold { background: #78350f; color: #fcd34d; }
+    .badge-buy { background: #14532d; color: #6ee7b7; }
+    .badge-sell { background: #7f1d1d; color: #fca5a5; }
+    .badge-on { background: #14532d; color: #6ee7b7; }
+    .badge-off { background: #374151; color: #9ca3af; }
+    .empty { color: #4b5563; padding: 18px 10px; font-size: 0.85rem; }
+    .scroll-x { overflow-x: auto; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+    .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 500; color: #9ca3af; background: transparent; border: 1px solid transparent; }
+    .tab.active { background: #374151; color: #e5e7eb; border-color: #4b5563; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .chart-wrap { width: 100%; overflow: hidden; }
+    svg text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .chart-empty { color: #4b5563; font-size: 0.85rem; padding: 40px 0; text-align: center; }
+    .chart-row { display: flex; gap: 16px; }
+    .chart-row > div { flex: 1; min-width: 0; }
+  </style>
+</head>
+<body>
+
+<h1>TF2 Trading Hub</h1>
+
+<div class="card">
+  <h2>Bot Status</h2>
+  <div class="grid">
+    <div class="stat">
+      <div class="stat-label">Steam</div>
+      <div class="stat-value" id="s-steam">-</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Version</div>
+      <div class="stat-value dim" id="s-version">-</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Uptime</div>
+      <div class="stat-value dim" id="s-uptime">-</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Accepted today</div>
+      <div class="stat-value ok" id="s-accepted">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Declined today</div>
+      <div class="stat-value err" id="s-declined">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Listings</div>
+      <div class="stat-value dim" id="s-listings">-</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Last sync</div>
+      <div class="stat-value dim" id="s-sync">-</div>
+    </div>
+  </div>
+  <div id="err-box" class="error-box" style="display:none"></div>
+</div>
+
+<div class="card">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('offers')">Trade Log</div>
+    <div class="tab" onclick="switchTab('profit')">Profit</div>
+    <div class="tab" onclick="switchTab('listings')">Listings</div>
+    <div class="tab" onclick="switchTab('admin')">⚙ Admin</div>
+  </div>
+
+  <div id="tab-offers" class="tab-panel active">
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Time</th><th>Offer ID</th><th>Partner</th><th>Decision</th><th>Reason</th><th>Give</th><th>Receive</th></tr>
+        </thead>
+        <tbody id="offers-body">
+          <tr><td colspan="7" class="empty">No trade offers yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-profit" class="tab-panel">
+    <div class="grid" style="margin-bottom:16px">
+      <div class="stat">
+        <div class="stat-label">Total profit</div>
+        <div class="stat-value" id="p-total">-</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Total trades</div>
+        <div class="stat-value dim" id="p-trades">-</div>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div>
+        <h2 style="margin-bottom:8px">Cumulative Profit (ref)</h2>
+        <div class="chart-wrap" id="cum-chart"><div class="chart-empty">No data yet.</div></div>
+      </div>
+      <div>
+        <h2 style="margin-bottom:8px">Daily Profit (ref)</h2>
+        <div class="chart-wrap" id="bar-chart"><div class="chart-empty">No data yet.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-listings" class="tab-panel">
+    <button class="btn" id="sync-btn" onclick="triggerSync()">&#8635; Sync listings</button>
+    <span class="sync-msg" id="sync-msg"></span>
+    <div class="scroll-x" style="margin-top:14px">
+      <table>
+        <thead>
+          <tr><th>Intent</th><th>Item</th><th>Price</th><th>Override</th><th>Status</th></tr>
+        </thead>
+        <tbody id="listings-body">
+          <tr><td colspan="5" class="empty">Click Sync listings to load.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-admin" class="tab-panel">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn" id="bump-btn" onclick="triggerBump()">&#8679; Bump Listings</button>
+      <button class="btn btn-danger" id="cancel-all-btn" onclick="cancelAllOffers()">✕ Cancel All Offers</button>
+      <span class="sync-msg" id="admin-msg"></span>
+    </div>
+    <h2 style="margin-top:18px;margin-bottom:10px">Pending Outgoing Offers</h2>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Age</th><th>Description</th><th>Offer ID</th><th></th></tr>
+        </thead>
+        <tbody id="pending-body">
+          <tr><td colspan="4" class="empty">No pending offers.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h2 style="margin-top:18px;margin-bottom:10px">Abandoned Items <span class="muted" style="font-weight:400;text-transform:none;font-size:0.78rem">(unsold past abandon_days — not being relisted)</span></h2>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Days unsold</th><th></th></tr>
+        </thead>
+        <tbody id="abandoned-body">
+          <tr><td colspan="3" class="empty">No abandoned items.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function fmtUptime(s) {
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+}
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString() : '-'; }
+function fmtDate(iso) {
+  if (!iso) return '-';
+  var d = new Date(iso);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+}
+function fmtPrice(c) {
+  if (!c) return '-';
+  var p = [];
+  if (c.keys) p.push(c.keys + (c.keys === 1 ? ' key' : ' keys'));
+  if (c.metal) p.push(c.metal + ' ref');
+  return p.length ? p.join(' + ') : '-';
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// fetch wrapper that throws on non-2xx so callers can show errors instead of parsing HTML as JSON
+async function apiFetch(url, opts) {
+  var r = await fetch(url, opts);
+  if (!r.ok) throw new Error(url + ' returned HTTP ' + r.status);
+  return r.json();
+}
+
+// ── SVG line chart (cumulative profit) ───────────────────────────────────────
+function drawLineChart(containerId, points) {
+  var el = document.getElementById(containerId);
+  if (!points || points.length < 2) { el.innerHTML = '<div class="chart-empty">Not enough data yet.</div>'; return; }
+
+  var W = el.clientWidth || 400, H = 160;
+  var pad = { top: 12, right: 12, bottom: 28, left: 44 };
+  var iW = W - pad.left - pad.right, iH = H - pad.top - pad.bottom;
+
+  var vals = points.map(function(p) { return p.cum; });
+  var minV = Math.min(0, Math.min.apply(null, vals));
+  var maxV = Math.max(0, Math.max.apply(null, vals));
+  var range = maxV - minV || 1;
+
+  function px(i) { return pad.left + (i / (points.length - 1)) * iW; }
+  function py(v) { return pad.top + iH - ((v - minV) / range) * iH; }
+
+  var polyline = points.map(function(p, i) { return px(i) + ',' + py(p.cum); }).join(' ');
+  var areaBottom = py(minV);
+  var area = 'M' + px(0) + ',' + areaBottom + ' L' + points.map(function(p, i) { return px(i) + ',' + py(p.cum); }).join(' L') + ' L' + px(points.length - 1) + ',' + areaBottom + ' Z';
+
+  // y-axis ticks
+  var tickCount = 4;
+  var ticks = [];
+  for (var t = 0; t <= tickCount; t++) {
+    var v = minV + (range / tickCount) * t;
+    var y = py(v);
+    ticks.push('<line x1="' + pad.left + '" x2="' + (pad.left + iW) + '" y1="' + y + '" y2="' + y + '" stroke="#374151" stroke-width="1"/>');
+    ticks.push('<text x="' + (pad.left - 6) + '" y="' + (y + 4) + '" fill="#6b7280" font-size="9" text-anchor="end">' + v.toFixed(1) + '</text>');
+  }
+
+  // x-axis labels (first, mid, last)
+  var xLabels = [0, Math.floor((points.length - 1) / 2), points.length - 1].map(function(i) {
+    var d = new Date(points[i].ts);
+    var label = (d.getMonth() + 1) + '/' + d.getDate();
+    return '<text x="' + px(i) + '" y="' + (H - 6) + '" fill="#6b7280" font-size="9" text-anchor="middle">' + label + '</text>';
+  });
+
+  // zero line
+  var zeroLine = minV < 0 && maxV > 0 ? '<line x1="' + pad.left + '" x2="' + (pad.left + iW) + '" y1="' + py(0) + '" y2="' + py(0) + '" stroke="#4b5563" stroke-width="1" stroke-dasharray="3,3"/>' : '';
+
+  var lineColor = vals[vals.length - 1] >= 0 ? '#34d399' : '#f87171';
+
+  el.innerHTML = '<svg width="' + W + '" height="' + H + '">' +
+    ticks.join('') + xLabels.join('') + zeroLine +
+    '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + lineColor + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + lineColor + '" stop-opacity="0.02"/></linearGradient></defs>' +
+    '<path d="' + area + '" fill="url(#ag)"/>' +
+    '<polyline points="' + polyline + '" fill="none" stroke="' + lineColor + '" stroke-width="2" stroke-linejoin="round"/>' +
+    '</svg>';
+}
+
+// ── SVG bar chart (daily profit) ─────────────────────────────────────────────
+function drawBarChart(containerId, days) {
+  var el = document.getElementById(containerId);
+  if (!days || !days.length) { el.innerHTML = '<div class="chart-empty">Not enough data yet.</div>'; return; }
+
+  var W = el.clientWidth || 400, H = 160;
+  var pad = { top: 12, right: 12, bottom: 28, left: 44 };
+  var iW = W - pad.left - pad.right, iH = H - pad.top - pad.bottom;
+
+  var vals = days.map(function(d) { return d.profit; });
+  var maxAbs = Math.max(0.01, Math.max.apply(null, vals.map(Math.abs)));
+  var barW = Math.max(4, iW / days.length - 3);
+
+  function bx(i) { return pad.left + (i + 0.5) * (iW / days.length); }
+  var zeroY = pad.top + iH / 2;
+
+  var bars = days.map(function(d, i) {
+    var h = Math.abs(d.profit) / maxAbs * (iH / 2);
+    var positive = d.profit >= 0;
+    var y = positive ? zeroY - h : zeroY;
+    var col = positive ? '#34d399' : '#f87171';
+    var label = d.date.slice(5); // MM-DD
+    return '<rect x="' + (bx(i) - barW / 2) + '" y="' + y + '" width="' + barW + '" height="' + Math.max(1, h) + '" fill="' + col + '" rx="2"/>' +
+      '<text x="' + bx(i) + '" y="' + (H - 6) + '" fill="#6b7280" font-size="9" text-anchor="middle">' + label + '</text>';
+  });
+
+  var yTicks = [-maxAbs, 0, maxAbs].map(function(v) {
+    var y = zeroY - (v / maxAbs) * (iH / 2);
+    return '<line x1="' + pad.left + '" x2="' + (pad.left + iW) + '" y1="' + y + '" y2="' + y + '" stroke="#374151" stroke-width="1"/>' +
+      '<text x="' + (pad.left - 6) + '" y="' + (y + 4) + '" fill="#6b7280" font-size="9" text-anchor="end">' + v.toFixed(1) + '</text>';
+  });
+
+  el.innerHTML = '<svg width="' + W + '" height="' + H + '">' + yTicks.join('') + bars.join('') + '</svg>';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+var currentTab = 'offers';
+var allTabs = ['offers', 'profit', 'listings', 'admin'];
+function switchTab(t) {
+  currentTab = t;
+  document.querySelectorAll('.tab').forEach(function(el, i) {
+    el.classList.toggle('active', allTabs[i] === t);
+  });
+  allTabs.forEach(function(name) {
+    document.getElementById('tab-' + name).classList.toggle('active', name === t);
+  });
+  if (t === 'profit') loadHistory();
+  if (t === 'listings') loadListings();
+  if (t === 'admin') { loadPending(); loadAbandoned(); }
+}
+
+function statusDot(status) {
+  var cls = { online:'dot-online', connecting:'dot-connecting', offline:'dot-offline', error:'dot-error' }[status] || 'dot-offline';
+  return '<span class="dot ' + cls + '"></span>';
+}
+function statusColor(status) {
+  return { online:'ok', connecting:'warn', offline:'muted', error:'err' }[status] || 'muted';
+}
+
+async function loadStatus() {
+  try {
+    var d = await apiFetch('api/status');
+    document.getElementById('s-version').textContent = d.version || '-';
+    document.getElementById('s-uptime').textContent = fmtUptime(d.uptime_seconds || 0);
+    document.getElementById('s-accepted').textContent = d.accepted_today || 0;
+    document.getElementById('s-declined').textContent = d.declined_today || 0;
+    document.getElementById('s-listings').textContent = d.listings_count !== null ? d.listings_count : '-';
+    document.getElementById('s-sync').textContent = fmtDate(d.last_sync);
+    var steamEl = document.getElementById('s-steam');
+    steamEl.className = 'stat-value ' + statusColor(d.steam_status);
+    steamEl.innerHTML = statusDot(d.steam_status) + (d.steam_status || 'offline');
+    if (d.steam_id && d.steam_status === 'online')
+      steamEl.innerHTML += ' <span class="muted" style="font-size:0.75rem">(' + d.steam_id + ')</span>';
+    var eb = document.getElementById('err-box');
+    if (d.last_error) { eb.style.display = ''; eb.textContent = d.last_error; }
+    else eb.style.display = 'none';
+    renderOffers(d.recent_offers || []);
+  } catch (e) { console.error('status error', e); }
+}
+
+function renderOffers(offers) {
+  var tb = document.getElementById('offers-body');
+  if (!offers.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">No trade decisions logged yet.</td></tr>'; return; }
+  tb.innerHTML = offers.map(function(o) {
+    var cls = { accept:'badge-accept', decline:'badge-decline', hold:'badge-hold' }[o.action] || 'badge-hold';
+    var profit = o.profit >= 0
+      ? '<span class="ok">+' + o.profit.toFixed(2) + '</span>'
+      : '<span class="err">' + o.profit.toFixed(2) + '</span>';
+    return '<tr>' +
+      '<td class="muted">' + fmtTime(o.ts) + '</td>' +
+      '<td class="muted">' + esc(o.offer_id || '-') + '</td>' +
+      '<td><a href="https://steamcommunity.com/profiles/' + o.partner + '" target="_blank" style="color:#60a5fa;text-decoration:none">' + esc(String(o.partner).slice(-6)) + '</a></td>' +
+      '<td><span class="badge ' + cls + '">' + (o.action || '-').toUpperCase() + '</span></td>' +
+      '<td class="muted">' + esc(o.reason || '') + '</td>' +
+      '<td>' + (o.give_ref != null ? o.give_ref.toFixed(2) + ' ref' : '-') + '</td>' +
+      '<td>' + (o.recv_ref != null ? o.recv_ref.toFixed(2) + ' ref' : '-') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function loadHistory() {
+  try {
+    var d = await apiFetch('api/history');
+    var tot = d.total_profit || 0;
+    document.getElementById('p-total').className = 'stat-value ' + (tot >= 0 ? 'ok' : 'err');
+    document.getElementById('p-total').textContent = (tot >= 0 ? '+' : '') + tot.toFixed(2) + ' ref';
+    document.getElementById('p-trades').textContent = (d.cumulative || []).length;
+    drawLineChart('cum-chart', d.cumulative || []);
+    drawBarChart('bar-chart', d.daily || []);
+  } catch (e) { console.error('history error', e); }
+}
+
+async function loadListings() {
+  try {
+    var results = await Promise.all([apiFetch('api/listings'), apiFetch('api/price-overrides')]);
+    var list = Array.isArray(results[0].listings) ? results[0].listings : [];
+    var overrides = results[1].overrides || {};
+    var tb = document.getElementById('listings-body');
+    if (!list.length) { tb.innerHTML = '<tr><td colspan="5" class="empty">No listings. Click sync to load.</td></tr>'; return; }
+    tb.innerHTML = list.map(function(l) {
+      var buy = l.intent === 0 || l.intent === 'buy';
+      var active = l.active !== false;
+      var name = (l.item && l.item.name) ? (l.item.name) : 'Item';
+      var ov = overrides[name] !== undefined ? overrides[name] : '';
+      return '<tr>' +
+        '<td><span class="badge ' + (buy ? 'badge-buy' : 'badge-sell') + '">' + (buy ? 'BUY' : 'SELL') + '</span></td>' +
+        '<td>' + esc(name) + '</td>' +
+        '<td>' + fmtPrice(l.currencies) + '</td>' +
+        '<td>' +
+          '<span style="display:flex;gap:4px;align-items:center">' +
+          '<input type="number" min="0" step="0.11" style="width:72px;background:#111827;border:1px solid #374151;color:#e5e7eb;border-radius:4px;padding:2px 6px;font-size:0.8rem" ' +
+            'placeholder="ref" value="' + esc(String(ov)) + '" data-override-name="' + esc(name) + '">' +
+          '<button class="btn btn-sm" style="margin-top:0" data-override-set="' + esc(name) + '">Set</button>' +
+          (ov !== '' ? '<button class="btn btn-sm btn-danger" style="margin-top:0" data-override-clear="' + esc(name) + '">✕</button>' : '') +
+          '</span>' +
+        '</td>' +
+        '<td><span class="badge ' + (active ? 'badge-on' : 'badge-off') + '">' + (active ? 'Active' : 'Inactive') + '</span></td>' +
+        '</tr>';
+    }).join('');
+  } catch (e) { console.error('listings error', e); }
+}
+
+// Delegated handler for price override set/clear buttons
+document.addEventListener('click', async function(e) {
+  var name = e.target && e.target.getAttribute && e.target.getAttribute('data-override-set');
+  if (name) {
+    var input = document.querySelector('input[data-override-name="' + name + '"]');
+    var price = input ? input.value.trim() : '';
+    if (price === '') return;
+    try {
+      await fetch('api/price-override', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: name, price: parseFloat(price) }) });
+      loadListings();
+    } catch(e) { console.error('override error', e); }
+  }
+  var clearName = e.target && e.target.getAttribute && e.target.getAttribute('data-override-clear');
+  if (clearName) {
+    try {
+      await fetch('api/price-override', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: clearName, price: null }) });
+      loadListings();
+    } catch(e) { console.error('override clear error', e); }
+  }
+});
+
+async function triggerSync() {
+  var btn = document.getElementById('sync-btn');
+  var msg = document.getElementById('sync-msg');
+  btn.disabled = true; msg.textContent = 'Syncing...';
+  try {
+    var r = await fetch('api/sync', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    msg.textContent = 'Done — reloading in 4s...';
+    setTimeout(async function() {
+      await Promise.all([loadStatus(), loadListings()]);
+      msg.textContent = ''; btn.disabled = false;
+    }, 4000);
+  } catch (e) { msg.textContent = 'Error: ' + e.message; btn.disabled = false; }
+}
+
+async function loadAbandoned() {
+  try {
+    var d = await apiFetch('api/abandoned');
+    var items = d.items || [];
+    var tb = document.getElementById('abandoned-body');
+    if (!items.length) { tb.innerHTML = '<tr><td colspan="3" class="empty">No abandoned items.</td></tr>'; return; }
+    tb.innerHTML = items.map(function(i) {
+      return '<tr>' +
+        '<td>' + esc(i.name) + '</td>' +
+        '<td class="warn">' + Number(i.days) + ' days</td>' +
+        '<td><button class="btn btn-sm" data-relist-name="' + esc(i.name) + '">Force Relist</button></td>' +
+        '</tr>';
+    }).join('');
+  } catch(e) { console.error('abandoned error', e); }
+}
+
+// Delegated handler for Force Relist buttons
+document.addEventListener('click', function(e) {
+  var name = e.target && e.target.getAttribute && e.target.getAttribute('data-relist-name');
+  if (name) relistItem(name);
+});
+
+async function relistItem(name) {
+  try {
+    var r = await fetch('api/relist', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: name}) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setTimeout(loadAbandoned, 2000);
+  } catch(e) { console.error('relist error', e); }
+}
+
+async function loadPending() {
+  try {
+    var d = await apiFetch('api/pending');
+    var offers = d.offers || [];
+    var tb = document.getElementById('pending-body');
+    if (!offers.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">No pending offers.</td></tr>'; return; }
+    // Use data-cancel-id + event delegation instead of inline onclick to avoid
+    // any chance of XSS via injection into a JS-string context.
+    tb.innerHTML = offers.map(function(o) {
+      return '<tr>' +
+        '<td class="muted">' + Number(o.age_min) + 'm ago</td>' +
+        '<td>' + esc(o.desc) + '</td>' +
+        '<td class="muted">' + esc(o.id) + '</td>' +
+        '<td><button class="btn btn-danger btn-sm" data-cancel-id="' + esc(o.id) + '">Cancel</button></td>' +
+        '</tr>';
+    }).join('');
+  } catch(e) { console.error('pending error', e); }
+}
+
+// Delegated handler for Cancel buttons in the pending table
+document.addEventListener('click', function(e) {
+  var id = e.target && e.target.getAttribute && e.target.getAttribute('data-cancel-id');
+  if (id) cancelOffer(id);
+});
+
+async function triggerBump() {
+  var btn = document.getElementById('bump-btn');
+  var msg = document.getElementById('admin-msg');
+  btn.disabled = true; msg.textContent = 'Bumping...';
+  try {
+    var r = await fetch('api/bump', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    msg.textContent = 'Listings bumped!';
+  } catch(e) { msg.textContent = 'Error: ' + e.message; }
+  setTimeout(function() { msg.textContent = ''; btn.disabled = false; }, 3000);
+}
+
+async function cancelAllOffers() {
+  var btn = document.getElementById('cancel-all-btn');
+  var msg = document.getElementById('admin-msg');
+  btn.disabled = true; msg.textContent = 'Cancelling...';
+  try {
+    var r = await fetch('api/offers/cancel', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    msg.textContent = 'All offers cancelled.';
+    setTimeout(loadPending, 1000);
+  } catch(e) { msg.textContent = 'Error: ' + e.message; }
+  setTimeout(function() { msg.textContent = ''; btn.disabled = false; }, 3000);
+}
+
+async function cancelOffer(id) {
+  try {
+    var r = await fetch('api/offers/cancel', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id: id}) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setTimeout(loadPending, 500);
+  } catch(e) { console.error('cancel error', e); }
+}
+
+async function refresh() {
+  await loadStatus();
+  if (currentTab === 'profit') loadHistory();
+  if (currentTab === 'listings') loadListings();
+  if (currentTab === 'admin') { loadPending(); loadAbandoned(); }
+}
+
+// Refresh every 15s — but only while the tab is visible (saves bandwidth + battery).
+var refreshTimer = null;
+function startRefresh() {
+  if (refreshTimer == null) refreshTimer = setInterval(refresh, 15000);
+}
+function stopRefresh() {
+  if (refreshTimer != null) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) stopRefresh();
+  else { refresh(); startRefresh(); }
+});
+refresh();
+startRefresh();
+</script>
+</body>
+</html>

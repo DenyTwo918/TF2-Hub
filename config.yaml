@@ -1,0 +1,65 @@
+slug: tf2_trading_hub
+name: TF2 Trading Hub
+version: "1.8.1"
+description: Autonomous TF2 trading bot — monitors trade offers and accepts profitable ones 24/7.
+url: https://github.com/DenyTwo918/TF2-HA
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_entry: /
+ingress_port: 8099
+panel_icon: mdi:robot
+panel_title: TF2 Bot
+options:
+  steam_username: ""
+  steam_password: ""
+  steam_shared_secret: ""
+  steam_identity_secret: ""
+  steam_api_key: ""
+  backpack_tf_token: ""
+  backpack_tf_api_key: ""
+  min_profit_ref: 0.11
+  accept_donations: false
+  sync_interval_minutes: 15
+  buy_items: ""
+  max_auto_buy: 150
+  currency_reserve_pct: 50
+  max_stock: 3
+  price_overrides: []  autokeys_enable: false
+  autokeys_min_refined: 20
+  autokeys_max_refined: 80
+  abandon_days: 7
+  dynamic_profit_pct: 1
+  mvm_parts_stock: 10
+  max_trade_value_keys: 5
+schema:
+  steam_username: str
+  steam_password: password
+  steam_shared_secret: password
+  steam_identity_secret: password
+  steam_api_key: str
+  backpack_tf_token: password
+  backpack_tf_api_key: password
+  min_profit_ref: float(0,100)
+  accept_donations: bool
+  sync_interval_minutes: int(5,1440)
+  buy_items: str
+  max_auto_buy: int(1,200)
+  currency_reserve_pct: int(0,95)
+  max_stock: int(1,20)
+  price_overrides:
+    - str
+  autokeys_enable: bool
+  autokeys_min_refined: int(0,500)
+  autokeys_max_refined: int(1,500)
+  abandon_days: int(0,365)
+  dynamic_profit_pct: int(0,20)
+  mvm_parts_stock: int(0,50)
+  max_trade_value_keys: int(0,200)
