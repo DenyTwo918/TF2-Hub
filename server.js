@@ -1366,6 +1366,34 @@ async function _syncInventoryListings() {
       // then fall back to a live classifieds fetch if the item isn't in the price list.
       // Pass the Steam Market hash name (includes wear for decorated weapons/war paints).
       const mktHash = itemMarketHashName(item);
+
+      // Check for a manual UI price override — if set, use it directly and skip all
+      // undercut / stale-reprice logic so the override is actually respected.
+      const uiOverrides = (readState().ui_price_overrides) || {};
+      const manualOverride = uiOverrides[item.name];
+      if (manualOverride !== undefined) {
+        const sellRef = +Number(manualOverride).toFixed(2);
+        if (sellRef < 0.11) {
+          console.log('[tf2-hub] override price too low for ' + item.name + ' (' + sellRef + ') — skip');
+          continue;
+        }
+        console.log('[tf2-hub] price override ' + item.name + ': ' + sellRef.toFixed(2) + ' ref');
+        if (!listingTs[item.name]) listingTs[item.name] = {};
+        if (!listingTs[item.name].firstListedAt) listingTs[item.name].firstListedAt = Date.now();
+        listingTs[item.name] = { postedAt: Date.now(), sellRef, firstListedAt: listingTs[item.name].firstListedAt };
+        const keys = Math.floor(sellRef / keyPriceRef);
+        const metal = +(sellRef - keys * keyPriceRef).toFixed(2);
+        const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
+        listings.push({
+          intent: 1,
+          id: item.assetid,
+          currencies: { keys, metal },
+          details: '✅ AUTO-ACCEPT | ' + priceStr + ' [override] | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+        });
+        seen.add(item.name);
+        continue;
+      }
+
       let market = await getRefPrice(item.name, mktHash);
       if (!market && apiToken) {
         await sleep(300);
