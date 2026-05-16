@@ -2124,7 +2124,7 @@ async function snipeBuyOrders() {
         'https://api.backpack.tf/api/classifieds/search/v1?token='
         + encodeURIComponent(token)
         + '&item=' + encodeURIComponent(item.name)
-        + '&intent=buy&tradable=1&craftable=1&quality=6&page_size=10'
+        + '&intent=buy&tradable=1&page_size=10'
       );
 
       const listings = (data.buy?.listings || []).filter(
