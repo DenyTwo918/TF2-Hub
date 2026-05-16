@@ -1,11 +1,11 @@
 #!/bin/bash
 # TF2 Trading Hub — patch all app files without an HA add-on update.
 # Run from HA Terminal add-on:
-#   curl -fsSL https://raw.githubusercontent.com/DenyTwo918/TF2-HA-Hub/main/update.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/DenyTwo918/TF2-Hub/main/update.sh | bash
 
 set -e
 
-BASE="https://raw.githubusercontent.com/DenyTwo918/TF2-HA-Hub/main"
+BASE="https://raw.githubusercontent.com/DenyTwo918/TF2-Hub/main"
 
 # Find the running container (slug can be prefixed with repo hash)
 CONTAINER=$(docker ps --format '{{.Names}}' | grep -m1 'tf2_trading_hub' || true)
