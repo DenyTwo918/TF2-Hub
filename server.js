@@ -1657,8 +1657,16 @@ async function _syncInventoryListings() {
     const created = result.listings ? Object.values(result.listings).filter(l => !l.error).length : listings.length;
     const errors  = result.listings ? Object.values(result.listings).filter(l =>  l.error).length : 0;
     console.log('[tf2-hub] listings posted:', created, 'ok' + (errors ? ', ' + errors + ' errors' : ''));
-    // Delay dashboard refresh — the batch POST just saturated the API quota;
-    // firing another GET immediately causes 429.  Wait 15 s for the quota window to reset.
+    // Save posted listings to state immediately so the dashboard can show them right away.
+    // Also schedule a bp.tf fetch after 15s to get accurate listing IDs/status.
+    const st = readState();
+    st.listings = listings.map(l => ({
+      intent: l.intent,
+      currencies: l.currencies,
+      active: true,
+      item: { name: inventory.find(i => i.assetid === l.id)?.name || '' }
+    }));
+    writeState(st);
     setTimeout(() => syncListings().catch(() => {}), 15000);
   } catch (err) {
     console.error('[tf2-hub] inventory list error:', err.message);
