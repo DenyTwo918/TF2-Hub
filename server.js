@@ -275,7 +275,7 @@ async function computeLiquidItems() {
   if (Date.now() - autoLiquidTs < AUTO_LIQUID_TTL && autoLiquidItems.length) return autoLiquidItems;
 
   const opts = readOptions();
-  const token = opts.backpack_tf_api_key || opts.backpack_tf_token;
+  const token = opts.backpack_tf_token; // classifieds search requires user token, not api key
   if (!token) return [];
 
   const minProfit = Number(opts.min_profit_ref ?? 0.11);
@@ -1315,7 +1315,7 @@ async function _syncInventoryListings() {
   const baseMinProfit = Number(opts.min_profit_ref ?? 0.11);
   const dynamicPct = Number(opts.dynamic_profit_pct ?? 3);
   const costs = readCosts();
-  const apiToken = opts.backpack_tf_api_key || opts.backpack_tf_token;
+  const apiToken = opts.backpack_tf_token; // classifieds search requires user token, not api key
 
   try {
     // Fetch bot's TF2 inventory
@@ -1769,8 +1769,7 @@ function buildCurrencyItems(refNeeded, inventory) {
 
 async function snipeClassifieds() {
   const opts = readOptions();
-  // Use api key if available, fall back to user token
-  const token = opts.backpack_tf_api_key || opts.backpack_tf_token;
+  const token = opts.backpack_tf_token; // classifieds search requires user token, not api key
   if (!token) return;
 
   const configItems = (opts.buy_items || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -2095,7 +2094,7 @@ server.on('error', err => {
 // This means the bot doesn't just wait for buyers — it hunts them down.
 async function snipeBuyOrders() {
   const opts = readOptions();
-  const token = opts.backpack_tf_api_key || opts.backpack_tf_token;
+  const token = opts.backpack_tf_token; // classifieds search requires user token, not api key
   if (!token) return;
   console.log('[tf2-hub] sell-snipe: scanning buy orders...');
 
