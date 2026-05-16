@@ -1889,7 +1889,9 @@ async function handle(req, res) {
   }
 
   if (req.method === 'POST' && pathname === '/api/sync') {
-    guardedSync(syncInventoryListings, 'manual-sync').catch(() => {});
+    // If already syncing let it finish; if idle start a fresh sync.
+    // Either way the client waits 20s then reloads state.
+    if (!isSyncing) syncInventoryListings().catch(() => {});
     return jsonReply(res, 200, { ok: true });
   }
 
