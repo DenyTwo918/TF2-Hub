@@ -399,7 +399,7 @@ async function loadListings() {
         '<td>' + fmtPrice(l.currencies) + '</td>' +
         '<td>' +
           '<span style="display:flex;gap:4px;align-items:center">' +
-          '<input type="number" min="0" step="0.11" style="width:72px;background:#111827;border:1px solid #374151;color:#e5e7eb;border-radius:4px;padding:2px 6px;font-size:0.8rem" ' +
+          '<input type="text" style="width:80px;background:#111827;border:1px solid #374151;color:#e5e7eb;border-radius:4px;padding:2px 6px;font-size:0.8rem"' +
             'placeholder="ref" value="' + esc(String(ov)) + '" data-override-name="' + esc(name) + '">' +
           '<button class="btn btn-sm" style="margin-top:0" data-override-set="' + esc(name) + '">Set</button>' +
           (ov !== '' ? '<button class="btn btn-sm btn-danger" style="margin-top:0" data-override-clear="' + esc(name) + '">✕</button>' : '') +
