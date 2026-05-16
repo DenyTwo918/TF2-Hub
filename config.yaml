@@ -32,7 +32,8 @@ options:
   max_auto_buy: 150
   currency_reserve_pct: 50
   max_stock: 3
-  price_overrides: []  autokeys_enable: false
+  price_overrides: []
+  autokeys_enable: false
   autokeys_min_refined: 20
   autokeys_max_refined: 80
   abandon_days: 7
