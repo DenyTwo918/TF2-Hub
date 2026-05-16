@@ -713,7 +713,7 @@ function isNonCraftable(item) {
   return item.descriptions.some(d => /not.*usable.*in.*crafting/i.test(String(d.value || '')));
 }
 
-async function priceItems(items) {
+async function priceItems(items, label) {
   let total = 0;
   const unknown = [];
   for (const item of items) {
@@ -733,8 +733,13 @@ async function priceItems(items) {
           ref = +(ref - NC_PENALTY).toFixed(4);
         }
     }
-    if (ref !== null) total += ref * (item.amount || 1);
-    else unknown.push(item.name);
+    if (ref !== null) {
+      total += ref * (item.amount || 1);
+      if (label) console.log('[tf2-hub] price-item [' + label + '] ' + item.name + ': ' + ref.toFixed(4) + ' ref');
+    } else {
+      unknown.push(item.name);
+      if (label) console.log('[tf2-hub] price-item [' + label + '] ' + item.name + ': NO PRICE');
+    }
   }
   return { total, unknown };
 }
@@ -1038,8 +1043,8 @@ async function evaluateOffer(offer) {
   // ─────────────────────────────────────────────────────────────────────────
 
   const [give, recv] = await Promise.all([
-    priceItems(offer.itemsToGive),
-    priceItems(offer.itemsToReceive),
+    priceItems(offer.itemsToGive, 'give'),
+    priceItems(offer.itemsToReceive, 'recv'),
   ]);
   const profit = recv.total - give.total;
   // Dynamic min profit: scale with the larger side of the trade so expensive
