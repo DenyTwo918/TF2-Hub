@@ -795,7 +795,7 @@ client.on('webSession', (sessionID, cookies) => {
       console.log('[tf2-hub] auto-confirmation active');
     }
     console.log('[tf2-hub] trade manager ready');
-    guardedSync(syncInventoryListings, 'init-listings').catch(e => console.error('[tf2-hub] init listings error:', e.message));
+    syncInventoryListings().catch(e => console.error('[tf2-hub] init listings error:', e.message));
   });
 });
 
@@ -1151,7 +1151,7 @@ async function evaluateOffer(offer) {
       if (err) console.error('[tf2-hub] accept error:', err.message);
       else {
         console.log('[tf2-hub] offer', offer.id, 'accepted');
-        setTimeout(() => guardedSync(syncInventoryListings, 'post-accept').catch(() => {}), 15000);
+        setTimeout(() => syncInventoryListings().catch(() => {}), 15000);
       }
     });
   } else if (action === 'counter') {
@@ -1303,6 +1303,12 @@ async function syncListings() {
 const CURRENCY_NAMES = new Set(['Refined Metal', 'Reclaimed Metal', 'Scrap Metal', 'Mann Co. Supply Crate Key']);
 
 async function syncInventoryListings() {
+  if (isSyncing) { console.log('[tf2-hub] syncInventoryListings: already running — skipped'); return; }
+  isSyncing = true;
+  try { await _syncInventoryListings(); } finally { isSyncing = false; }
+}
+
+async function _syncInventoryListings() {
   const opts = readOptions();
   if (!opts.backpack_tf_token) return;
 
@@ -1684,7 +1690,7 @@ manager.on('sentOfferChanged', (offer) => {
   }
   if (offer.state === 3) { // Accepted — inventory changed, re-post listings
     console.log('[tf2-hub] sent offer', offer.id, 'accepted — scheduling listing refresh');
-    setTimeout(() => guardedSync(syncInventoryListings, 'sent-offer-accepted').catch(() => {}), 15000);
+    setTimeout(() => syncInventoryListings().catch(() => {}), 15000);
   }
 });
 
@@ -2176,7 +2182,7 @@ server.listen(PORT, HOST, () => {
   const syncMs = Math.max(5, Number(opts.sync_interval_minutes) || 15) * 60 * 1000;
   setInterval(syncListings, syncMs);
   setInterval(fetchKeyPrice, 6 * 60 * 60 * 1000);
-  setInterval(() => guardedSync(syncInventoryListings, 'auto-bump').catch(() => {}), 15 * 60 * 1000); // every 15min = auto-bump
+  setInterval(() => syncInventoryListings().catch(() => {}), 15 * 60 * 1000); // every 15min = auto-bump
   setInterval(() => guardedSync(snipeClassifieds, 'snipe-classifieds').catch(() => {}), 90 * 1000);
   setInterval(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders').catch(() => {}), 5 * 60 * 1000); // sell to buy-order bots every 5min
   setTimeout(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders-first').catch(() => {}), 60 * 1000); // first run 60s after startup (let login settle)
