@@ -2131,6 +2131,9 @@ async function snipeBuyOrders() {
         l => !appState.steam_id || String(l.steamid) !== String(appState.steam_id)
       );
 
+      if (listings.length > 0)
+        console.log('[tf2-hub] sell-snipe: ' + item.name + ' — ' + listings.length + ' buy order(s) found');
+
       for (const listing of listings) {
         const buyerPaysRef = (listing.price?.keys || 0) * keyPriceRef + (listing.price?.metal || 0);
         const cost    = costs[item.assetid] || 0;
@@ -2153,7 +2156,7 @@ async function snipeBuyOrders() {
 
         // Avoid re-sending to the same buyer this session
         const listingKey = 'sell-' + String(listing.steamid) + '-' + item.name;
-        if (sentSnipes.has(listingKey)) continue;
+        if (sentSnipes.has(listingKey)) { console.log('[tf2-hub] sell-snipe: already sent to buyer ' + listing.steamid + ' this session'); continue; }
 
         // Skip scammers
         if (await isScammer(String(listing.steamid))) {
@@ -2162,7 +2165,10 @@ async function snipeBuyOrders() {
         }
 
         const tradeUrl = listing.trade_url || listing.user?.trade_url;
-        if (!tradeUrl) continue;
+        if (!tradeUrl) {
+          console.log('[tf2-hub] sell-snipe: buyer ' + listing.steamid + ' has no trade URL — skip');
+          continue;
+        }
 
         // Fetch buyer's inventory to grab their currency
         let buyerInv;
@@ -2206,8 +2212,7 @@ async function snipeBuyOrders() {
         break; // one sell offer per item per cycle — don't double-sell
       }
     } catch (err) {
-      if (!err.message.includes('403') && !err.message.includes('429'))
-        console.error('[tf2-hub] sell-snipe error (' + item.name + '):', err.message);
+      console.error('[tf2-hub] sell-snipe error (' + item.name + '):', err.message);
     }
   }
 }
