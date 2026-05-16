@@ -1899,7 +1899,15 @@ async function handle(req, res) {
   }
 
   if (req.method === 'GET' && pathname === '/api/listings') {
-    return jsonReply(res, 200, { listings: readState().listings || [] });
+    const listings = readState().listings || [];
+    // Normalise listings from bp.tf API format or our own saved format
+    const normalised = listings.map(l => ({
+      intent:     l.intent,
+      currencies: l.currencies || {},
+      active:     l.active !== false && l.active !== 0,
+      item:       { name: (l.item && l.item.name) ? l.item.name : '' }
+    }));
+    return jsonReply(res, 200, { listings: normalised });
   }
 
   if (req.method === 'POST' && pathname === '/api/sync') {

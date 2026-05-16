@@ -381,9 +381,10 @@ async function loadHistory() {
 
 async function loadListings() {
   try {
-    var results = await Promise.all([apiFetch('api/listings'), apiFetch('api/price-overrides')]);
-    var list = Array.isArray(results[0].listings) ? results[0].listings : [];
-    var overrides = results[1].overrides || {};
+    var d = await apiFetch('api/listings');
+    var list = Array.isArray(d.listings) ? d.listings : [];
+    var overrides = {};
+    try { var od = await apiFetch('api/price-overrides'); overrides = od.overrides || {}; } catch(e) {}
     var tb = document.getElementById('listings-body');
     if (!list.length) { tb.innerHTML = '<tr><td colspan="5" class="empty">No listings. Click sync to load.</td></tr>'; return; }
     tb.innerHTML = list.map(function(l) {
