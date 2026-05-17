@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.6';
+const VERSION = '1.8.7';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1698,16 +1698,8 @@ async function _syncInventoryListings() {
         market = await getCheapestSellRef(item.name, apiToken);
       }
       if (!market || market < 0.11) {
-        // Craft-hat fallback: no individual price found, use the community craft-hat
-        // market rate as the baseline so undercut/stale logic still applies normally.
-        const craftHatPrice = Number(opts.craft_hat_price ?? 1.33);
-        if (isCraftHat(item) && craftHatPrice >= 0.11) {
-          market = craftHatPrice;
-          console.log('[tf2-hub] craft-hat fallback ' + item.name + ': using ' + craftHatPrice.toFixed(2) + ' ref as market base');
-        } else {
-          console.log('[tf2-hub] no price for ' + item.name + ' — skip sell listing');
-          continue;
-        }
+        console.log('[tf2-hub] no price for ' + item.name + (isCraftHat(item) ? ' (craft hat — add bp.tf price to list it)' : '') + ' — skipping');
+        continue;
       }
       const cost = costs[item.assetid] || 0;
       const minProfit = effectiveMinProfit(market, baseMinProfit, dynamicPct);
