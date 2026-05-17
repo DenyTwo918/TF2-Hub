@@ -40,6 +40,7 @@ options:
   dynamic_profit_pct: 1
   mvm_parts_stock: 10
   max_trade_value_keys: 5
+  craft_hat_price: 1.33
 schema:
   steam_username: str
   steam_password: password
@@ -64,3 +65,4 @@ schema:
   dynamic_profit_pct: int(0,20)
   mvm_parts_stock: int(0,50)
   max_trade_value_keys: int(0,200)
+  craft_hat_price: float(0,50)

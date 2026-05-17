@@ -337,20 +337,28 @@ async function loadBpPriceList() {
     if (!data.response || data.response.success !== 1) return false;
 
     bpPriceList = new Map();
-    const thirtyDaysAgo = Date.now() / 1000 - 30 * 86400;
+
+    const toRef = (val, cur) =>
+      cur === 'keys' ? val * keyPriceRef : cur === 'metal' ? val : null;
+    const addEntry = (key, entry) => {
+      if (!entry) return;
+      const buy  = toRef(entry.value, entry.currency);
+      const sell = toRef(entry.value_high ?? entry.value, entry.currency);
+      if (buy !== null && sell !== null)
+        bpPriceList.set(key, { buy, sell, lastUpdate: entry.last_update || 0 });
+    };
 
     for (const [name, item] of Object.entries(data.response.items || {})) {
-      const entry = item.prices?.['6']?.Tradable?.Craftable?.[0];
-      if (!entry) continue;
+      const q6c  = item.prices?.['6']?.Tradable?.Craftable?.['[0]']
+                || item.prices?.['6']?.Tradable?.Craftable?.[0];
+      const q6nc = item.prices?.['6']?.Tradable?.['Non-Craftable']?.['[0]']
+                || item.prices?.['6']?.Tradable?.['Non-Craftable']?.[0];
+      const q11c = item.prices?.['11']?.Tradable?.Craftable?.['[0]']
+                || item.prices?.['11']?.Tradable?.Craftable?.[0];
 
-      const toRef = (val, cur) =>
-        cur === 'keys' ? val * keyPriceRef : cur === 'metal' ? val : null;
-
-      const buy = toRef(entry.value, entry.currency);
-      const sell = toRef(entry.value_high ?? entry.value, entry.currency);
-      if (buy === null || sell === null) continue;
-
-      bpPriceList.set(name, { buy, sell, lastUpdate: entry.last_update || 0 });
+      addEntry(name,                q6c);   // Unique craftable  (existing key)
+      addEntry(name + ';nc',        q6nc);  // Unique non-craftable
+      addEntry(name + ';strange',   q11c);  // Strange craftable
     }
 
     bpPriceListTs = Date.now();
@@ -803,9 +811,14 @@ function effectiveMinProfit(marketRef, baseMinProfit, dynamicPct) {
 
 // ─── TF2 Item Helpers ─────────────────────────────────────────────────────────
 
+// TF2 currency resolution is 1 scrap = 1/9 ref.  Round prices to the nearest
+// scrap to avoid IEEE-754 float drift (0.11+0.11+0.11 !== 0.33 in JavaScript).
+function snapToScrap(ref) { return Math.round(ref * 9) / 9; }
+
 // TF2 weapons are worth 0.05 ref each (half a scrap, their crafting value).
 // Identified by item tags: slot type primary/secondary/melee/pda/building.
 const WEAPON_SLOTS = new Set(['primary', 'secondary', 'melee', 'pda', 'pda2', 'building']);
+const COSMETIC_SLOTS = new Set(['head', 'misc']); // hat + accessory slot tags
 const WEAPON_REF = 1 / 18; // ~0.0556 ref ≈ 0.05 ref
 const NC_PENALTY = 1 / 9;  // Non-craftable items trade for ~1 scrap less than craftable
 
@@ -829,7 +842,35 @@ function isNonCraftable(item) {
   return item.descriptions.some(d => /not.*usable.*in.*crafting/i.test(String(d.value || '')));
 }
 
+// Craft hats: Unique (quality 6) craftable cosmetics that all trade at the same
+// bulk "craft hat" price.  Excludes Halloween-restricted items, weapons, taunts, tools.
+// tf2-express uses the special SKU "-100;6" for the same concept.
+function isCraftHat(item) {
+  if ((item.quality || 6) !== 6) return false;     // Unique quality only
+  if (isNonCraftable(item)) return false;           // Must be craftable
+  if (!Array.isArray(item.tags)) return false;
+  // Must have a cosmetic slot tag (head = headgear, misc = accessory)
+  if (!item.tags.some(t => t.category === 'Type' &&
+      COSMETIC_SLOTS.has((t.internal_name || '').toLowerCase()))) return false;
+  // Exclude holiday-restricted items (Halloween hats can't trade year-round)
+  if (item.tags.some(t => t.category === 'Holiday')) return false;
+  return true;
+}
+
+// Quality-aware IGetPrices lookup.  Returns the bpPriceList entry for the item
+// taking quality (Strange = 11) and craftability into account.
+function getBpEntry(item) {
+  if (!bpPriceList) return null;
+  const q  = item.quality || 6;
+  const nc = isNonCraftable(item);
+  if (q === 11) return bpPriceList.get(item.name + ';strange') || bpPriceList.get(item.name) || null;
+  if (nc)       return bpPriceList.get(item.name + ';nc')      || bpPriceList.get(item.name) || null;
+  return bpPriceList.get(item.name) || null;
+}
+
 async function priceItems(items, label) {
+  const opts = readOptions();
+  const craftHatPrice = Number(opts.craft_hat_price ?? 1.33);
   let total = 0;
   const unknown = [];
   for (const item of items) {
@@ -839,15 +880,28 @@ async function priceItems(items, label) {
       case 'Refined Metal':             ref = 1; break;
       case 'Reclaimed Metal':           ref = 1 / 3; break;
       case 'Scrap Metal':               ref = 1 / 9; break;
-      default:
-        ref = await getBuyMarketRef(item.name);
-        if (ref === null && isWeapon(item)) ref = WEAPON_REF;
-        // Non-craftable items trade for ~1 scrap less than craftable equivalents.
-        // Our classifieds search only fetches craftable competitors, so we apply
-        // the penalty here when valuing items received from a partner.
-        if (ref !== null && ref > NC_PENALTY && isNonCraftable(item)) {
-          ref = +(ref - NC_PENALTY).toFixed(4);
+      default: {
+        // 1. Quality-aware IGetPrices lookup (Strange, NC variants)
+        const bpE = getBpEntry(item);
+        if (bpE) {
+          ref = bpE.buy; // use buy price: what we'd pay for this item
+        } else if (isCraftHat(item) && craftHatPrice > 0) {
+          // 2. Generic craft hat price (all craft hats trade at same bulk price)
+          ref = craftHatPrice;
+        } else {
+          // 3. Classifieds / Steam Market fallback
+          ref = await getBuyMarketRef(item.name);
+          if (ref === null && isWeapon(item)) ref = WEAPON_REF;
         }
+        // NC penalty: if no dedicated NC entry existed in IGetPrices (getBpEntry
+        // fell back to craftable price), deduct 1 scrap manually.
+        const hadDedicatedNcEntry = isNonCraftable(item) &&
+          bpPriceList && bpPriceList.has(item.name + ';nc');
+        if (ref !== null && ref > NC_PENALTY && isNonCraftable(item) && !hadDedicatedNcEntry) {
+          ref = snapToScrap(ref - NC_PENALTY);
+        }
+        break;
+      }
     }
     if (ref !== null) {
       total += ref * (item.amount || 1);
@@ -1480,14 +1534,40 @@ async function _syncInventoryListings() {
     for (const item of inventory) {
       if (!item.tradable || CURRENCY_NAMES.has(item.name) || seen.has(item.name)) continue;
 
+      // ── Craft hats: all bulk-priced at the configured craft-hat price ────────
+      // Quality-6 craftable cosmetics (hats + accessories) all trade at a fixed
+      // "craft hat" market price.  Items with their own individual bp.tf price
+      // more than 1.5× above craft hat price get individual pricing instead.
+      const craftHatPrice = Number(opts.craft_hat_price ?? 1.33);
+      if (isCraftHat(item) && craftHatPrice > 0) {
+        const bpE = getBpEntry(item);
+        const indivPrice = bpE ? bpE.sell : 0;
+        if (!bpE || indivPrice <= craftHatPrice * 1.5) {
+          // List at bulk craft-hat price
+          const sellRef = snapToScrap(craftHatPrice);
+          const keys  = Math.floor(sellRef / keyPriceRef);
+          const metal = snapToScrap(sellRef - keys * keyPriceRef);
+          const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
+          listings.push({
+            intent: 1,
+            id: item.assetid,
+            currencies: { keys, metal },
+            details: '🎩 CRAFT HAT | ' + priceStr + ' | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+          });
+          seen.add(item.name);
+          continue;
+        }
+        // Individual price is notably higher → fall through to normal pricing
+      }
+
       // ── Weapons: list at the standard 0.05 ref weapon floor ─────────────────
       // Stock weapons have no meaningful market value; their trade-up value is
       // 0.5 scrap ≈ 0.05 ref.  BUT weapon RESKINS (e.g. Bat Outta Hell, Holy
       // Mackerel, Saxxy) share the same slot tags yet have real market prices —
       // detect them via IGetPrices and fall through to normal pricing if priced.
       if (isWeapon(item)) {
-        const bpEntry = bpPriceList && bpPriceList.get(item.name);
-        const bpSellRef = bpEntry ? bpEntry.sell : 0;
+        const bpE = getBpEntry(item);
+        const bpSellRef = bpE ? bpE.sell : 0;
         if (bpSellRef >= 0.11) {
           // Has a real IGetPrices price → treat as a normal item, not a stock weapon
         } else {
@@ -1534,7 +1614,10 @@ async function _syncInventoryListings() {
         continue;
       }
 
-      let market = await getRefPrice(item.name, mktHash);
+      // Quality-aware price: try getBpEntry first (handles Strange q11, NC q6)
+      // then fall back to getRefPrice (classifieds cache / IGetPrices / PriceDB / Steam)
+      const bpItemEntry = getBpEntry(item);
+      let market = bpItemEntry ? bpItemEntry.sell : await getRefPrice(item.name, mktHash);
       if (!market && apiToken) {
         await sleep(300);
         market = await getCheapestSellRef(item.name, apiToken);
@@ -1605,12 +1688,15 @@ async function _syncInventoryListings() {
         }
       }
 
+      // Snap to nearest scrap to avoid float precision drift in listing currencies
+      sellRef = snapToScrap(sellRef);
+
       // Update timestamp — preserve firstListedAt across reposts
       listingTs[item.name] = { postedAt: Date.now(), sellRef, firstListedAt: listingTs[item.name].firstListedAt };
 
-      const keys = Math.floor(sellRef / keyPriceRef);
-      const metal = +(sellRef - keys * keyPriceRef).toFixed(2);
-      const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
+      const keys  = Math.floor(sellRef / keyPriceRef);
+      const metal = snapToScrap(sellRef - keys * keyPriceRef);
+      const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
       listings.push({
         intent: 1,
         id: item.assetid,
