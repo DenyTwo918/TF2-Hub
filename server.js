@@ -923,6 +923,14 @@ async function priceItems(items, label, costs = {}) {
         if (ref !== null && ref > NC_PENALTY && isNonCraftable(item) && !hadDedicatedNcEntry) {
           ref = snapToScrap(ref - NC_PENALTY);
         }
+        // Weapon floor: some stock weapons (e.g. Baby Face's Blaster, Atomizer) have
+        // an IGetPrices craftable price ≈ 0.11 ref. When NC, the penalty drops them to
+        // ~0 — but ref stays non-null so they don't go to unknown, they just get priced
+        // at 0. Apply WEAPON_REF (≈0.06) as hard floor for any weapon below it.
+        if (ref !== null && ref < WEAPON_REF && isWeapon(item)) ref = WEAPON_REF;
+        // Same zero-floor for all items: if NC penalty zeroed out the price entirely,
+        // treat as unpriced rather than valuing at 0 (which would corrupt totals).
+        if (ref !== null && ref <= 0) ref = null;
         break;
       }
     }
