@@ -269,12 +269,12 @@ async function loadTf2Schema() {
   }
 }
 
-// ─── prices.tf ────────────────────────────────────────────────────────────────
-// Free token: sign in at https://prices.tf with Steam, copy your token from
-// the site. Add it as prices_tf_token in the addon config.
+// ─── PriceDB.IO ───────────────────────────────────────────────────────────────
+// Free, no auth required. Covers MvM parts, cases, war paints, and any other
+// item not in backpack.tf IGetPrices. Rate limit: 360 req/min.
 
-const pricesTfCache = new Map(); // sku → { sell, buy, ts }
-const PRICES_TF_TTL = 30 * 60 * 1000;
+const priceDbCache = new Map(); // sku → { sell, buy, ts }
+const PRICEDB_TTL = 30 * 60 * 1000;
 
 function itemNameToSku(name, quality = 6) {
   const defindex = tf2NameToDefindex.get(name);
@@ -282,26 +282,21 @@ function itemNameToSku(name, quality = 6) {
   return defindex + ';' + quality;
 }
 
-async function getPricesTf(name, quality = 6) {
-  const opts = readOptions();
-  if (!opts.prices_tf_token) return null;
+async function getPriceDb(name, quality = 6) {
   await loadTf2Schema();
   const sku = itemNameToSku(name, quality);
   if (!sku) return null;
 
-  const cached = pricesTfCache.get(sku);
-  if (cached && Date.now() - cached.ts < PRICES_TF_TTL) return cached;
+  const cached = priceDbCache.get(sku);
+  if (cached && Date.now() - cached.ts < PRICEDB_TTL) return cached;
 
   try {
-    const data = await httpsGet(
-      'https://api.prices.tf/items/' + encodeURIComponent(sku),
-      { Authorization: 'Bearer ' + opts.prices_tf_token }
-    );
+    const data = await httpsGet('https://pricedb.io/api/item/' + encodeURIComponent(sku));
     const sell = (data.sell?.keys || 0) * keyPriceRef + (data.sell?.metal || 0);
     const buy  = (data.buy?.keys  || 0) * keyPriceRef + (data.buy?.metal  || 0);
     if (!sell && !buy) return null;
     const entry = { sell, buy, ts: Date.now() };
-    pricesTfCache.set(sku, entry);
+    priceDbCache.set(sku, entry);
     return entry;
   } catch { return null; }
 }
@@ -501,9 +496,9 @@ async function getRefPrice(name, marketName = name) {
     return cachedClassifieds.ref;
   // backpack.tf IGetPrices fallback (community price, can lag actual market)
   if (await loadBpPriceList() && bpPriceList.has(name)) return bpPriceList.get(name).sell;
-  // prices.tf fallback — covers items missing from IGetPrices (MvM parts, cases, war paints…)
-  const ptf = await getPricesTf(name);
-  if (ptf && ptf.sell > 0) { console.log('[tf2-hub] prices.tf price for ' + name + ': ' + ptf.sell.toFixed(2) + ' ref'); return ptf.sell; }
+  // PriceDB.IO fallback — covers items missing from IGetPrices (MvM parts, cases, war paints…)
+  const pdb = await getPriceDb(name);
+  if (pdb && pdb.sell > 0) { console.log('[tf2-hub] pricedb price for ' + name + ': ' + pdb.sell.toFixed(2) + ' ref'); return pdb.sell; }
   // Steam Market fallback — use marketName (includes wear for decorated weapons)
   const usd = await getSteamMarketPrice(marketName);
   if (usd === null) return null;
