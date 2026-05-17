@@ -1470,18 +1470,26 @@ async function _syncInventoryListings() {
     for (const item of inventory) {
       if (!item.tradable || CURRENCY_NAMES.has(item.name) || seen.has(item.name)) continue;
 
-      // ── Weapons: always list at the standard 0.05 ref weapon floor ──────────
-      // Weapons have no meaningful IGetPrices/classifieds entry; their trade-up
-      // value is 0.5 scrap ≈ 0.05 ref.  List immediately — no undercut logic needed.
+      // ── Weapons: list at the standard 0.05 ref weapon floor ─────────────────
+      // Stock weapons have no meaningful market value; their trade-up value is
+      // 0.5 scrap ≈ 0.05 ref.  BUT weapon RESKINS (e.g. Bat Outta Hell, Holy
+      // Mackerel, Saxxy) share the same slot tags yet have real market prices —
+      // detect them via IGetPrices and fall through to normal pricing if priced.
       if (isWeapon(item)) {
-        listings.push({
-          intent: 1,
-          id: item.assetid,
-          currencies: { keys: 0, metal: 0.05 },
-          details: '✅ AUTO-ACCEPT | 0.05 ref | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
-        });
-        seen.add(item.name);
-        continue;
+        const bpEntry = bpPriceList && bpPriceList.get(item.name);
+        const bpSellRef = bpEntry ? bpEntry.sell : 0;
+        if (bpSellRef >= 0.11) {
+          // Has a real IGetPrices price → treat as a normal item, not a stock weapon
+        } else {
+          listings.push({
+            intent: 1,
+            id: item.assetid,
+            currencies: { keys: 0, metal: 0.05 },
+            details: '✅ AUTO-ACCEPT | 0.05 ref | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+          });
+          seen.add(item.name);
+          continue;
+        }
       }
 
       // For everything else: try IGetPrices first (instant, no rate-limit),
