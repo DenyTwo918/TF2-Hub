@@ -2592,9 +2592,12 @@ server.listen(PORT, HOST, () => {
   setInterval(() => syncInventoryListings().catch(() => {}), 15 * 60 * 1000); // every 15min = auto-bump
   // snipeClassifieds disabled — bp.tf /search/v1 requires WebSocket now;
   // REST polling caused account ban. Buy listings handle purchasing instead.
+  // ALL /search/v1 polling disabled — API key banned for frequent abuse.
+  // Listings (buy + sell) continue working via the listings management API.
+  // Re-enable after getting a new API key from backpack.tf/developer.
   // setInterval(() => guardedSync(snipeClassifieds, 'snipe-classifieds').catch(() => {}), 90 * 1000);
-  setInterval(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders').catch(() => {}), 5 * 60 * 1000); // sell to buy-order bots every 5min
-  setTimeout(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders-first').catch(() => {}), 60 * 1000); // first run 60s after startup (let login settle)
+  // setInterval(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders').catch(() => {}), 5 * 60 * 1000);
+  // setTimeout(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders-first').catch(() => {}), 60 * 1000);
 
   // Auto-cancel pending offers older than 30 minutes
   setInterval(() => {
