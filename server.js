@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.4';
+const VERSION = '1.8.5';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1632,8 +1632,6 @@ async function _syncInventoryListings() {
     for (const item of inventory) {
       if (!item.tradable || CURRENCY_NAMES.has(item.name) || seen.has(item.name)) continue;
 
-      // ── Craft hats: skip — not worth listing at bulk price ──────────────────
-      if (isCraftHat(item)) continue;
 
       // ── Weapons: list at the standard 0.05 ref weapon floor ─────────────────
       // Stock weapons have no meaningful market value; their trade-up value is
