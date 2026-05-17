@@ -183,6 +183,8 @@ const appState = {
 // rate-limit quota.  Sniping operations (snipeClassifieds, snipeBuyOrders) skip
 // their cycle if a full sync is in progress.
 let isSyncing = false;
+let lastSyncCompletedAt = 0;
+const MIN_SYNC_COOLDOWN_MS = 3 * 60 * 1000; // minimum 3 minutes between full syncs
 
 async function guardedSync(fn, name) {
   if (isSyncing) {
@@ -1307,10 +1309,15 @@ async function syncListings() {
 
 const CURRENCY_NAMES = new Set(['Refined Metal', 'Reclaimed Metal', 'Scrap Metal', 'Mann Co. Supply Crate Key']);
 
-async function syncInventoryListings() {
+async function syncInventoryListings(force = false) {
   if (isSyncing) { console.log('[tf2-hub] syncInventoryListings: already running — skipped'); return; }
+  const sinceLast = Date.now() - lastSyncCompletedAt;
+  if (!force && sinceLast < MIN_SYNC_COOLDOWN_MS) {
+    console.log('[tf2-hub] syncInventoryListings: cooldown (' + Math.round((MIN_SYNC_COOLDOWN_MS - sinceLast) / 1000) + 's remaining) — skipped');
+    return;
+  }
   isSyncing = true;
-  try { await _syncInventoryListings(); } finally { isSyncing = false; }
+  try { await _syncInventoryListings(); } finally { isSyncing = false; lastSyncCompletedAt = Date.now(); }
 }
 
 async function _syncInventoryListings() {
@@ -1946,12 +1953,12 @@ async function handle(req, res) {
   if (req.method === 'POST' && pathname === '/api/sync') {
     // If already syncing let it finish; if idle start a fresh sync.
     // Either way the client waits 20s then reloads state.
-    if (!isSyncing) syncInventoryListings().catch(() => {});
+    if (!isSyncing) syncInventoryListings(true).catch(() => {}); // force=true bypasses cooldown
     return jsonReply(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && pathname === '/api/bump') {
-    syncInventoryListings().catch(() => {});
+    syncInventoryListings(true).catch(() => {}); // force=true bypasses cooldown
     return jsonReply(res, 200, { ok: true });
   }
 
