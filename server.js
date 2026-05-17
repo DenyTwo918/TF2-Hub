@@ -2214,6 +2214,7 @@ async function snipeBuyOrders() {
   const token = opts.backpack_tf_token; // classifieds search requires user token, not api key
   if (!token) return;
   console.log('[tf2-hub] sell-snipe: scanning buy orders...');
+  let snipeErrors = 0;
 
   const baseMinProfit = Number(opts.min_profit_ref ?? 0.11);
   const dynamicPct    = Number(opts.dynamic_profit_pct ?? 3);
@@ -2234,6 +2235,8 @@ async function snipeBuyOrders() {
   for (const item of inventory) {
     if (!item.tradable || CURRENCY_NAMES.has(item.name) || seen.has(item.name)) continue;
     seen.add(item.name);
+
+    await sleep(600); // respect bp.tf rate limit — ~1 req/s across all concurrent callers
 
     try {
       const data = await httpsGet(
@@ -2328,9 +2331,13 @@ async function snipeBuyOrders() {
         break; // one sell offer per item per cycle — don't double-sell
       }
     } catch (err) {
-      console.error('[tf2-hub] sell-snipe error (' + item.name + '):', err.message);
+      snipeErrors++;
+      // Only log non-rate-limit errors; tally 403/429 and print a summary at the end
+      if (!err.message.includes('403') && !err.message.includes('429'))
+        console.error('[tf2-hub] sell-snipe error (' + item.name + '):', err.message);
     }
   }
+  if (snipeErrors > 0) console.log('[tf2-hub] sell-snipe: ' + snipeErrors + ' item(s) skipped (rate-limited or no access)');
 }
 
 // ─── Startup ─────────────────────────────────────────────────────────────────
