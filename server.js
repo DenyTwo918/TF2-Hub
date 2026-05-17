@@ -653,12 +653,12 @@ async function getMarketSnapshot(name, apiKey) {
   const cached = marketSnapshotCache.get(name);
   if (cached && Date.now() - cached.ts < MARKET_SNAPSHOT_TTL) return cached.snap;
 
-  // No API key → degrade to IGetPrices only (low confidence)
+  // No API key → IGetPrices only (still 'medium' — it IS our primary source now)
   const bpEntry = bpPriceList && bpPriceList.get(name);
   const bpSell = bpEntry ? bpEntry.sell : null;
   if (!apiKey) {
     if (bpSell === null) return null;
-    return { truth: bpSell, buyCeiling: bpSell * 0.85, confidence: 'low', sells: [bpSell], buyers: 0, bpSell, cheapestSell: null, median: bpSell, highestBuy: null, outlier: false };
+    return { truth: bpSell, buyCeiling: bpSell * 0.85, confidence: 'medium', sells: [bpSell], buyers: 0, bpSell, cheapestSell: null, median: bpSell, highestBuy: null, outlier: false };
   }
 
   // Fetch live classifieds (both sides), populate legacy caches as a side-effect
@@ -683,43 +683,53 @@ async function getMarketSnapshot(name, apiKey) {
   const outlier = cheapestSell !== null && highestBuy !== null && cheapestSell < highestBuy;
 
   // ── Estimate the real market sell price ("truth") ──
+  // Priority (matches tf2-express approach):
+  //   1. IGetPrices community consensus  ← primary source of truth
+  //   2. Classifieds median              ← fallback if not in IGetPrices
+  //   3. Highest buy × 1.05             ← last resort estimate
+  // Classifieds data is still fetched — it drives undercut pricing in the SELL loop
+  // (cheapestSell) and buy-ceiling anchors, but is NOT the price we trust for value.
   let truth;
-  if (outlier && sells[1]) truth = sells[1];
-  else if (median !== null) truth = median;
-  else if (highestBuy !== null) truth = highestBuy * 1.05;
-  else if (bpSell !== null) truth = bpSell;
-  else {
-    // No data anywhere → no snapshot at all
-    return null;
+  if (bpSell !== null) {
+    truth = bpSell;                              // community price wins
+  } else if (!outlier && median !== null) {
+    truth = median;                              // classifieds median fallback
+  } else if (sells[1] !== undefined) {
+    truth = sells[1];                            // outlier: skip the lowest outlier
+  } else if (highestBuy !== null) {
+    truth = highestBuy * 1.05;
+  } else {
+    return null;                                 // no data anywhere
   }
 
   // ── Score confidence ──
-  let confidence;
+  // When IGetPrices price exists it is the community-consensus → at least 'medium'.
+  // Cross-check with classifieds to upgrade or downgrade.
   const pctDiff = (a, b) => Math.max(a, b) / Math.min(a, b);
-  if (outlier && samples < 3) {
-    confidence = 'untrusted'; // anomaly with no recovery sample
-  } else if (samples >= 3 && bpSell !== null) {
-    const r = pctDiff(median, bpSell);
-    if (r < 1.15) confidence = 'high';
-    else if (r < 1.30) confidence = 'medium';
-    else if (r < 1.60) confidence = 'low';
-    else confidence = 'untrusted';
+  let confidence;
+  if (bpSell !== null) {
+    if (cheapestSell !== null && !outlier) {
+      const r = pctDiff(bpSell, cheapestSell);
+      if (r < 1.30) confidence = 'high';    // classifieds agrees with community price
+      else if (r < 1.60) confidence = 'medium';
+      else confidence = 'low';              // big divergence — stale IGetPrices?
+    } else {
+      confidence = 'medium';               // community price only, no classifieds
+    }
   } else if (samples >= 3) {
-    confidence = 'medium';
+    confidence = outlier ? 'low' : 'medium';
   } else if (samples === 2) {
     confidence = pctDiff(sells[0], sells[1]) < 1.30 ? 'medium' : 'low';
-  } else if (samples === 1 && bpSell !== null) {
-    confidence = pctDiff(cheapestSell, bpSell) < 1.30 ? 'low' : 'untrusted';
   } else if (samples === 1) {
     confidence = 'low';
   } else if (highestBuy !== null) {
     confidence = 'low';
   } else {
-    confidence = 'low'; // IGetPrices only
+    confidence = 'low';
   }
 
-  // Extra safety: if truth disagrees with bpSell by >2x with thin samples → untrust
-  if (bpSell !== null && samples < 3 && pctDiff(truth, bpSell) > 2) confidence = 'untrusted';
+  // Physically impossible market: cheapest sell < highest buy with no backup → untrusted
+  if (outlier && samples < 3 && bpSell === null) confidence = 'untrusted';
 
   // ── Conservative buy ceiling (min of every available anchor) ──
   // Each anchor represents an upper bound the bot should never cross.
