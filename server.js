@@ -997,6 +997,42 @@ client.on('friendRelationship', (steamID, relationship) => {
 
 // ─── Steam Chat Commands ─────────────────────────────────────────────────────
 
+// Resolve a user-typed item name to the canonical name used in IGetPrices.
+// Handles: underscores → spaces, series suffixes (#119), case, partial words.
+// Returns the best matching canonical name, or the normalised query if no match.
+function resolveItemName(query) {
+  if (!query) return '';
+  // Normalise: underscores → spaces, collapse whitespace, strip trailing #NNN
+  let q = query.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().replace(/\s+#\d+$/, '');
+
+  if (bpPriceList) {
+    const qLow = q.toLowerCase();
+
+    // 1. Exact case-insensitive match
+    for (const key of bpPriceList.keys()) {
+      if (key.includes(';')) continue; // skip ;strange / ;nc variants
+      if (key.toLowerCase() === qLow) return key;
+    }
+
+    // 2. All-words partial match (every word in the query appears in the item name)
+    const words = qLow.split(/\s+/).filter(w => w.length > 1);
+    const matches = [];
+    for (const key of bpPriceList.keys()) {
+      if (key.includes(';')) continue;
+      const kLow = key.toLowerCase();
+      if (words.length && words.every(w => kLow.includes(w))) matches.push(key);
+    }
+    if (matches.length === 1) return matches[0];
+    // Multiple partial matches → prefer shortest (least ambiguous) name
+    if (matches.length > 1) {
+      matches.sort((a, b) => a.length - b.length);
+      return matches[0];
+    }
+  }
+
+  return q; // return normalised query even when not found in price list
+}
+
 client.on('friendMessage', (steamID, message) => {
   handleChatCommand(steamID, message.trim()).catch(err =>
     console.error('[tf2-hub] chat command error:', err.message));
@@ -1038,16 +1074,14 @@ async function handleChatCommand(steamID, message) {
 
     case '!price': {
       if (!args) { reply('Usage: !price <item name>'); break; }
-      const ref = await getRefPrice(args);
-      if (!ref) { reply('❌ No price found for: ' + args); break; }
+      const priceName = resolveItemName(args);
+      const ref = await getRefPrice(priceName);
+      if (!ref) { reply('❌ No price found for: ' + priceName); break; }
       const opts = readOptions();
       const minP = Number(opts.min_profit_ref ?? 0.11);
-      // Match the real bot logic:
-      //  buy = market - 0.11 (undercut) - minProfit (margin)  ← same as snipe maxBuyRef
-      //  sell = market - 0.11 (undercut)                       ← same as freshRef
-      const buyAt  = Math.max(0.11, +(ref - 0.11 - minP).toFixed(2));
-      const sellAt = Math.max(0.11, +(ref - 0.11).toFixed(2));
-      reply('💲 ' + args + '\n  I buy for:  ' + buyAt + ' ref\n  I sell for: ' + sellAt + ' ref');
+      const buyAt  = snapToScrap(Math.max(0.11, ref - 0.11 - minP));
+      const sellAt = snapToScrap(Math.max(0.11, ref - 0.11));
+      reply('💲 ' + priceName + '\n  I buy for:  ' + buyAt.toFixed(2) + ' ref\n  I sell for: ' + sellAt.toFixed(2) + ' ref');
       break;
     }
 
@@ -1070,7 +1104,7 @@ async function handleChatCommand(steamID, message) {
     case '!buy': {
       if (!args) { reply('Usage: !buy <item name>'); break; }
       // Strip optional leading quantity: "!buy 2 Item Name" → "Item Name"
-      const buyArgs = args.replace(/^\d+\s+/, '');
+      const buyArgs = resolveItemName(args.replace(/^\d+\s+/, ''));
       const ref = await getRefPrice(buyArgs);
       if (!ref) { reply('❌ I don\'t have a price for: ' + buyArgs); break; }
       const opts = readOptions();
@@ -1118,7 +1152,7 @@ async function handleChatCommand(steamID, message) {
     case '!sell': {
       if (!args) { reply('Usage: !sell <item name>'); break; }
       // Strip optional leading quantity: "!sell 2 Item Name" → "Item Name"
-      const sellArgs = args.replace(/^\d+\s+/, '');
+      const sellArgs = resolveItemName(args.replace(/^\d+\s+/, ''));
       let botInv;
       try {
         botInv = await new Promise((resolve, reject) =>
