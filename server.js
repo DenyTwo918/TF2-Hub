@@ -92,10 +92,12 @@ function httpsGet(url, extraHeaders) {
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
         const body = Buffer.concat(chunks).toString();
-        if (res.statusCode < 200 || res.statusCode >= 300)
-          return reject(new Error('HTTP ' + res.statusCode));
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          const preview = body.slice(0, 120).replace(/\s+/g, ' ');
+          return reject(new Error('HTTP ' + res.statusCode + (preview ? ': ' + preview : '')));
+        }
         try { resolve(JSON.parse(body)); }
-        catch { reject(new Error('invalid JSON')); }
+        catch { reject(new Error('invalid JSON: ' + body.slice(0, 80))); }
       });
     });
     req.on('error', reject);
@@ -2137,6 +2139,7 @@ async function snipeClassifieds() {
     const maxBuyRef = +(expectedSellRef - minProfit).toFixed(2);
     if (maxBuyRef <= 0) continue;
 
+    await sleep(600); // 600 ms between items — stay under bp.tf rate limit
     try {
       const data = await httpsGet(
         'https://api.backpack.tf/api/classifieds/search/v1?key='
@@ -2192,8 +2195,7 @@ async function snipeClassifieds() {
         });
       }
     } catch (err) {
-      if (!err.message.includes('403') && !err.message.includes('429'))
-        console.error('[tf2-hub] snipe error (' + name + '):', err.message);
+      console.error('[tf2-hub] snipe error (' + name + '):', err.message);
     }
   }
 }
