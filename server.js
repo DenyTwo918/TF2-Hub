@@ -1681,6 +1681,7 @@ async function _syncInventoryListings() {
     }
     console.log('[tf2-hub] market snapshot pre-warm complete');
 
+    let skipUntrusted = 0, skipLowConf = 0, skipNoBuyers = 0, skipCap = 0;
     for (const { name, stock: itemMaxStock } of buyItemsParsed) {
       if (buyListingCount >= maxAutoBuy) break;
       if ((stockCount[name] || 0) >= itemMaxStock) continue; // at stock limit
@@ -1691,15 +1692,18 @@ async function _syncInventoryListings() {
 
       // Gate 1: untrusted data → NEVER buy
       if (snap.confidence === 'untrusted') {
-        console.log('[tf2-hub] skip buy ' + name + ': untrusted market');
+        skipUntrusted++;
+        console.log('[tf2-hub] skip buy ' + name + ': untrusted market (cheap=' + (snap.cheapestSell?.toFixed(2) ?? '—') + ' bp=' + (snap.bpSell?.toFixed(2) ?? '—') + ')');
         continue;
       }
-      // Gate 2: low confidence is only OK if user explicitly whitelisted it
-      if (snap.confidence === 'low' && !whitelist.has(name)) {
-        continue; // silent skip — quiet log spam
+      // Gate 2: low confidence — only skip if not whitelisted AND no IGetPrices data at all
+      if (snap.confidence === 'low' && !whitelist.has(name) && snap.bpSell === null) {
+        skipLowConf++;
+        continue;
       }
-      // Gate 3: require ≥2 active buyers (real demand)
+      // Gate 3: require ≥2 active buyers (real demand) — skip only for auto-liquid, not explicit buy_items
       if (snap.buyers < 2 && !whitelist.has(name)) {
+        skipNoBuyers++;
         continue;
       }
       // Gate 4: per-trade value cap
@@ -1740,6 +1744,11 @@ async function _syncInventoryListings() {
       });
       buyListingCount++;
     }
+    console.log('[tf2-hub] buy loop done: ' + buyListingCount + ' listed' +
+      (skipUntrusted ? ', ' + skipUntrusted + ' untrusted' : '') +
+      (skipLowConf   ? ', ' + skipLowConf   + ' low-conf (no bp.tf data)' : '') +
+      (skipNoBuyers  ? ', ' + skipNoBuyers  + ' no-buyers' : '') +
+      (skipCap       ? ', ' + skipCap       + ' capped' : ''));
 
     // AUTOKEYS — keep PURE METAL balance in range by auto-buying/selling keys.
     // Threshold is metal-only (excluding keys); the config name autokeys_*_refined makes this explicit.
