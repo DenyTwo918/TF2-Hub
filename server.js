@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.8';
+const VERSION = '1.8.9';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -926,8 +926,16 @@ async function priceItems(items, label, costs = {}) {
             ref = bpE.sell;
           }
         } else if (isCraftHat(item) && craftHatPrice > 0) {
-          // 2. Generic craft hat price (all craft hats trade at same bulk price)
-          ref = craftHatPrice;
+          // 2. Craft hat: try real market price first; only fall back to craftHatPrice
+          // when RECEIVING (recv). For give items, falling back to 1.33 ref would let
+          // a lowballer buy an 18-ref Spooktacles for 1.44 ref — never accept that.
+          const mktRef = await getBuyMarketRef(item.name);
+          if (mktRef !== null) {
+            ref = mktRef;
+          } else if (label !== 'give') {
+            ref = craftHatPrice; // recv: undervaluing is safe — we won't overpay
+          }
+          // give + no market price: ref stays null → unknown[] → offer declined
         } else {
           // 3. Classifieds / Steam Market fallback
           ref = await getBuyMarketRef(item.name);
