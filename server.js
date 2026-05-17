@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.3';
+const VERSION = '1.8.4';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1632,32 +1632,8 @@ async function _syncInventoryListings() {
     for (const item of inventory) {
       if (!item.tradable || CURRENCY_NAMES.has(item.name) || seen.has(item.name)) continue;
 
-      // ── Craft hats: all bulk-priced at the configured craft-hat price ────────
-      // Quality-6 craftable cosmetics (hats + accessories) all trade at a fixed
-      // "craft hat" market price.  Items with their own individual bp.tf price
-      // more than 1.5× above craft hat price get individual pricing instead.
-      const craftHatPrice = Number(opts.craft_hat_price ?? 1.33);
-      if (isCraftHat(item) && craftHatPrice > 0) {
-        const bpE = getBpEntry(item);
-        const indivPrice = bpE ? bpE.sell : 0;
-        if (!bpE || indivPrice <= craftHatPrice * 1.5) {
-          // List at bulk craft-hat price
-          const sellRef = snapToScrap(craftHatPrice);
-          const keys  = Math.floor(sellRef / keyPriceRef);
-          const metal = snapToScrap(sellRef - keys * keyPriceRef);
-          const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
-          listings.push({
-            id: parseInt(item.assetid),  // v2: integer assetid (no prefix), no intent field (inferred from id presence)
-            currencies: { keys, metal },
-            details: '🎩 CRAFT HAT | ' + priceStr + ' | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
-            buyout: true,
-            offers: true,
-          });
-          seen.add(item.name);
-          continue;
-        }
-        // Individual price is notably higher → fall through to normal pricing
-      }
+      // ── Craft hats: skip — not worth listing at bulk price ──────────────────
+      if (isCraftHat(item)) continue;
 
       // ── Weapons: list at the standard 0.05 ref weapon floor ─────────────────
       // Stock weapons have no meaningful market value; their trade-up value is
