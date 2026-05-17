@@ -869,7 +869,7 @@ function getBpEntry(item) {
   return bpPriceList.get(item.name) || null;
 }
 
-async function priceItems(items, label) {
+async function priceItems(items, label, costs = {}) {
   const opts = readOptions();
   const craftHatPrice = Number(opts.craft_hat_price ?? 1.33);
   let total = 0;
@@ -885,7 +885,12 @@ async function priceItems(items, label) {
         // 1. Quality-aware IGetPrices lookup (Strange, NC variants)
         const bpE = getBpEntry(item);
         if (bpE) {
-          ref = bpE.buy; // use buy price: what we'd pay for this item
+          // For items the bot is GIVING (selling): use actual acquisition cost if
+          // we have it — this lets the bot accept trades where it sniped below
+          // community buy price and is selling above its own cost.
+          // Fall back to community buy price if no stored cost.
+          const storedCost = label === 'give' ? (costs[item.assetid] || 0) : 0;
+          ref = storedCost > 0 ? storedCost : bpE.buy;
         } else if (isCraftHat(item) && craftHatPrice > 0) {
           // 2. Generic craft hat price (all craft hats trade at same bulk price)
           ref = craftHatPrice;
@@ -1251,9 +1256,10 @@ async function evaluateOffer(offer) {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
+  const offerCosts = readCosts();
   const [give, recv] = await Promise.all([
-    priceItems(offer.itemsToGive, 'give'),
-    priceItems(offer.itemsToReceive, 'recv'),
+    priceItems(offer.itemsToGive, 'give', offerCosts),
+    priceItems(offer.itemsToReceive, 'recv', offerCosts),
   ]);
   const profit = recv.total - give.total;
   // Dynamic min profit: scale with the larger side of the trade so expensive
