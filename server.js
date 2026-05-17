@@ -2118,6 +2118,16 @@ async function handle(req, res) {
     return jsonReply(res, 200, { items: state.abandoned_items || [] });
   }
 
+  if (req.method === 'POST' && pathname === '/api/reset-price-history') {
+    const state = readState();
+    const count = Object.keys(state.listing_timestamps || {}).length;
+    state.listing_timestamps = {};
+    state.abandoned_items = [];
+    writeState(state);
+    console.log('[tf2-hub] price history cleared (' + count + ' items reset)');
+    return jsonReply(res, 200, { ok: true, cleared: count });
+  }
+
   if (req.method === 'GET' && pathname === '/api/history') {
     try {
       const lines = fs.readFileSync(OFFERS_PATH, 'utf8').trim().split('\n').filter(Boolean);

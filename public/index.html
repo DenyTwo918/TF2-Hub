@@ -173,7 +173,13 @@
         </tbody>
       </table>
     </div>
-    <h2 style="margin-top:18px;margin-bottom:10px">Abandoned Items <span class="muted" style="font-weight:400;text-transform:none;font-size:0.78rem">(unsold past abandon_days — not being relisted)</span></h2>
+    <div style="margin-top:18px;margin-bottom:16px;padding:14px;background:#111827;border:1px solid #374151;border-radius:8px">
+      <h2 style="margin-bottom:6px">Price History</h2>
+      <p class="dim" style="margin-bottom:10px;font-size:0.8rem">The bot remembers each item's last listed price to apply stale repricing. Clear this if prices seem stuck or wrong after changing overrides.</p>
+      <button class="btn btn-danger btn-sm" style="margin-top:0" onclick="resetPriceHistory()">Clear price history</button>
+      <span id="reset-ph-msg" class="sync-msg"></span>
+    </div>
+    <h2 style="margin-top:4px;margin-bottom:10px">Abandoned Items <span class="muted" style="font-weight:400;text-transform:none;font-size:0.78rem">(unsold past abandon_days — not being relisted)</span></h2>
     <div class="scroll-x">
       <table>
         <thead>
@@ -474,6 +480,17 @@ async function triggerSync() {
       } catch(e) { /* keep polling */ }
     }, 3000);
   } catch (e) { msg.textContent = 'Error: ' + e.message; btn.disabled = false; }
+}
+
+async function resetPriceHistory() {
+  var msg = document.getElementById('reset-ph-msg');
+  msg.textContent = 'Clearing...';
+  try {
+    var r = await fetch('api/reset-price-history', { method: 'POST' });
+    var d = await r.json();
+    msg.textContent = 'Cleared ' + (d.cleared || 0) + ' item(s). Sync to reprice everything fresh.';
+    setTimeout(function() { msg.textContent = ''; }, 5000);
+  } catch(e) { msg.textContent = 'Error: ' + e.message; }
 }
 
 async function loadAbandoned() {
