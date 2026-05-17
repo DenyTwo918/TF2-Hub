@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.2';
+const VERSION = '1.8.3';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -127,8 +127,10 @@ function httpsPost(url, body, extraHeaders) {
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
         const text = Buffer.concat(chunks).toString();
-        if (res.statusCode < 200 || res.statusCode >= 300)
-          return reject(new Error('HTTP ' + res.statusCode));
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          const preview = text.slice(0, 120).replace(/\s+/g, ' ');
+          return reject(new Error('HTTP ' + res.statusCode + (preview ? ': ' + preview : '')));
+        }
         try { resolve(JSON.parse(text)); } catch { resolve({}); }
       });
     });
@@ -1645,10 +1647,11 @@ async function _syncInventoryListings() {
           const metal = snapToScrap(sellRef - keys * keyPriceRef);
           const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
           listings.push({
-            intent: 'sell',
-            id: '440_' + item.assetid,
+            id: parseInt(item.assetid),  // v2: integer assetid (no prefix), no intent field (inferred from id presence)
             currencies: { keys, metal },
             details: '🎩 CRAFT HAT | ' + priceStr + ' | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+            buyout: true,
+            offers: true,
           });
           seen.add(item.name);
           continue;
@@ -1668,10 +1671,11 @@ async function _syncInventoryListings() {
           // Has a real IGetPrices price → treat as a normal item, not a stock weapon
         } else {
           listings.push({
-            intent: 'sell',
-            id: '440_' + item.assetid,
+            id: parseInt(item.assetid),
             currencies: { keys: 0, metal: 0.05 },
             details: '✅ AUTO-ACCEPT | 0.05 ref | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+            buyout: true,
+            offers: true,
           });
           seen.add(item.name);
           continue;
@@ -1701,10 +1705,11 @@ async function _syncInventoryListings() {
         const metal = +(sellRef - keys * keyPriceRef).toFixed(2);
         const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
         listings.push({
-          intent: 'sell',
-          id: '440_' + item.assetid,
+          id: parseInt(item.assetid),
           currencies: { keys, metal },
           details: '✅ AUTO-ACCEPT | ' + priceStr + ' [override] | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+          buyout: true,
+          offers: true,
         });
         seen.add(item.name);
         continue;
@@ -1798,10 +1803,11 @@ async function _syncInventoryListings() {
         + ' bp=' + (getBpEntry(item)?.sell?.toFixed(2) ?? '—')
         + ' comp=' + (cheapestComp?.toFixed(2) ?? '—'));
       listings.push({
-        intent: 'sell',
-        id: '440_' + item.assetid,
+        id: parseInt(item.assetid),
         currencies: { keys, metal },
         details: '✅ AUTO-ACCEPT | ' + priceStr + ' | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+        buyout: true,
+        offers: true,
       });
       seen.add(item.name);
     }
@@ -1951,10 +1957,12 @@ async function _syncInventoryListings() {
       const metal = +(buyRef - keys * keyPriceRef).toFixed(2);
       const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
       listings.push({
-        intent: 'buy',
-        item: { quality: 6, item_name: name, craftable: 1 },
+        // v2 buy: no id field — absence of id signals buy intent
+        item: { baseName: name, quality: { id: 6 }, craftable: true, tradable: true },
         currencies: { keys, metal },
         details: '💰 BUYING | ' + priceStr + ' | Stock: ' + (stockCount[name] || 0) + '/' + itemMaxStock + ' | Chat: buy_' + chatCmd(name),
+        buyout: true,
+        offers: true,
       });
       buyListingCount++;
     }
@@ -1980,13 +1988,13 @@ async function _syncInventoryListings() {
       if (metalOnlyRef > maxRef) {
         // Excess metal → buy keys (convert metal to keys at slight discount)
         const keyBuyMetal = +(keyPriceRef - 0.11).toFixed(2);
-        listings.push({ intent: 'buy', item: { quality: 6, item_name: 'Mann Co. Supply Crate Key', craftable: 1 }, currencies: { keys: 0, metal: keyBuyMetal }, details: '🔑 AUTO-BUY BOT | Buying keys instantly!' });
+        listings.push({ item: { baseName: 'Mann Co. Supply Crate Key', quality: { id: 6 }, craftable: true, tradable: true }, currencies: { keys: 0, metal: keyBuyMetal }, details: '🔑 AUTO-BUY BOT | Buying keys instantly!', buyout: true, offers: true });
         console.log('[tf2-hub] autokeys: buying keys (metal ' + metalOnlyRef.toFixed(1) + ' ref > max ' + maxRef + ')');
       } else if (metalOnlyRef < minRef) {
         // Low metal → sell a key for refined
         const keyItem = inventory.find(i => i.name === 'Mann Co. Supply Crate Key' && i.tradable);
         if (keyItem) {
-          listings.push({ intent: 'sell', id: '440_' + keyItem.assetid, currencies: { keys: 0, metal: keyPriceRef }, details: '🔑 AUTO-SELL BOT | Selling key for metal!' });
+          listings.push({ id: parseInt(keyItem.assetid), currencies: { keys: 0, metal: keyPriceRef }, details: '🔑 AUTO-SELL BOT | Selling key for metal!', buyout: true, offers: true });
           console.log('[tf2-hub] autokeys: selling key (metal ' + metalOnlyRef.toFixed(1) + ' ref < min ' + minRef + ')');
         }
       }
@@ -2028,15 +2036,21 @@ async function _syncInventoryListings() {
     const created = resultArr.length ? resultArr.filter(l => !l.error).length : listings.length;
     const errors  = resultArr.filter(l => l.error).length;
     console.log('[tf2-hub] listings posted:', created, 'ok' + (errors ? ', ' + errors + ' errors' : ''));
+    if (errors) {
+      // Log first few error messages so we can diagnose format issues
+      resultArr.filter(l => l.error).slice(0, 3).forEach((l, i) => {
+        console.error('[tf2-hub] listing error[' + i + ']:', JSON.stringify(l.error), '| payload:', JSON.stringify(listings[resultArr.indexOf(l)])?.slice(0, 120));
+      });
+    }
     // Save posted listings to state immediately so the dashboard can show them right away.
     // Also schedule a bp.tf fetch after 15s to get accurate listing IDs/status.
     const st = readState();
     st.listings = listings.map(l => ({
-      intent: l.intent,
+      // v2: intent derived from id presence (sell has integer assetid, buy has no id)
+      intent: l.id !== undefined ? 'sell' : 'buy',
       currencies: l.currencies,
       active: true,
-      // sell listings: id is '440_{assetid}'; buy listings: use item_name
-      item: { name: inventory.find(i => ('440_' + i.assetid) === l.id)?.name || l.item?.item_name || '' }
+      item: { name: inventory.find(i => parseInt(i.assetid) === l.id)?.name || l.item?.baseName || '' }
     }));
     writeState(st);
     setTimeout(() => syncListings().catch(() => {}), 15000);
