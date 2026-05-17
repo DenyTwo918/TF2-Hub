@@ -393,6 +393,7 @@ async function computeLiquidItems() {
   // Step 1: pre-filter by spread — O(n) over price list
   const candidates = [];
   for (const [name, p] of bpPriceList.entries()) {
+    if (name.includes(';')) continue; // skip ;strange / ;nc variant keys — not real item names
     if (skipNames.has(name)) continue;
     // Skip only if lastUpdate is set AND very old (0 = unknown = allow)
     if (p.lastUpdate > 0 && p.lastUpdate < ninetyDaysAgo) continue;
@@ -1844,8 +1845,11 @@ async function _syncInventoryListings() {
         skipLowConf++;
         continue;
       }
-      // Gate 3: require ≥2 active buyers (real demand) — skip only for auto-liquid, not explicit buy_items
-      if (snap.buyers < 2 && !whitelist.has(name)) {
+      // Gate 3: require ≥2 active buyers OR a confirmed IGetPrices community price.
+      // When classifieds are down (HTTP 500/timeout), buyers=0 for everything —
+      // don't starve the buy loop just because backpack.tf had a bad night.
+      // bpSell !== null means the item has a community-consensus price → it trades.
+      if (snap.buyers < 2 && snap.bpSell === null && !whitelist.has(name)) {
         skipNoBuyers++;
         continue;
       }
