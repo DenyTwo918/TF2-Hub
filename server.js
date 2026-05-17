@@ -901,8 +901,10 @@ async function handleChatCommand(steamID, message) {
 
     case '!buy': {
       if (!args) { reply('Usage: !buy <item name>'); break; }
-      const ref = await getRefPrice(args);
-      if (!ref) { reply('❌ I don\'t have a price for: ' + args); break; }
+      // Strip optional leading quantity: "!buy 2 Item Name" → "Item Name"
+      const buyArgs = args.replace(/^\d+\s+/, '');
+      const ref = await getRefPrice(buyArgs);
+      if (!ref) { reply('❌ I don\'t have a price for: ' + buyArgs); break; }
       const opts = readOptions();
       const minP = Number(opts.min_profit_ref ?? 0.11);
       const buyRef = Math.max(0.11, +(ref - 0.11 - minP).toFixed(2));
@@ -916,29 +918,29 @@ async function handleChatCommand(steamID, message) {
       } catch (e) { reply('❌ Could not load inventory: ' + e.message); break; }
 
       // Enforce stock limit — don't buy if we already have max_stock of this item
-      const maxStock = Math.max(1, Number(opts.max_stock || 1));
-      const currentStock = botInv.filter(i => i.name === args && !CURRENCY_NAMES.has(i.name)).length;
+      const maxStock = Math.max(1, Number(opts.max_stock ?? 3));
+      const currentStock = botInv.filter(i => i.name === buyArgs && !CURRENCY_NAMES.has(i.name)).length;
       if (currentStock >= maxStock) {
-        reply('❌ I already have ' + currentStock + ' ' + args + ' in stock (limit ' + maxStock + ').');
+        reply('❌ I already have ' + currentStock + ' ' + buyArgs + ' in stock (limit ' + maxStock + ').');
         break;
       }
 
-      const item = partnerInv.find(i => i.name === args && i.tradable);
-      if (!item) { reply('❌ Couldn\'t find ' + args + ' in your inventory (must be public & tradable).'); break; }
+      const item = partnerInv.find(i => i.name === buyArgs && i.tradable);
+      if (!item) { reply('❌ Couldn\'t find ' + buyArgs + ' in your inventory (must be public & tradable).'); break; }
 
       const currencyItems = buildCurrencyItems(buyRef, botInv);
       if (!currencyItems) { reply('❌ I don\'t have enough currency right now (' + buyRef.toFixed(2) + ' ref needed).'); break; }
 
-      reply('📨 Sending offer for your ' + args + ' — paying ' + buyRef.toFixed(2) + ' ref...');
+      reply('📨 Sending offer for your ' + buyArgs + ' — paying ' + buyRef.toFixed(2) + ' ref...');
       const offer = manager.createOffer(steamID.getSteamID64());
       offer.addTheirItems([{ appid: 440, contextid: '2', assetid: item.assetid }]);
       offer.addMyItems(currencyItems);
-      offer.setMessage('TF2-HA Bot — buying ' + args);
+      offer.setMessage('TF2-HA Bot — buying ' + buyArgs);
       offer.send(err => {
         if (err) reply('❌ Failed to send offer: ' + err.message);
         else {
           reply('✅ Offer sent! Check your trade offers.');
-          pendingOffers.set(offer.id, { ts: Date.now(), desc: '!buy from ' + steamID.getSteamID64().slice(-6) + ': ' + args });
+          pendingOffers.set(offer.id, { ts: Date.now(), desc: '!buy from ' + steamID.getSteamID64().slice(-6) + ': ' + buyArgs });
           savePending();
         }
       });
@@ -947,6 +949,8 @@ async function handleChatCommand(steamID, message) {
 
     case '!sell': {
       if (!args) { reply('Usage: !sell <item name>'); break; }
+      // Strip optional leading quantity: "!sell 2 Item Name" → "Item Name"
+      const sellArgs = args.replace(/^\d+\s+/, '');
       let botInv;
       try {
         botInv = await new Promise((resolve, reject) =>
@@ -954,11 +958,11 @@ async function handleChatCommand(steamID, message) {
             err ? reject(err) : resolve(items)));
       } catch { reply('❌ Could not load my inventory.'); break; }
 
-      const item = botInv.find(i => i.name === args && i.tradable && !CURRENCY_NAMES.has(i.name));
-      if (!item) { reply('❌ I don\'t have ' + args + ' in stock.'); break; }
+      const item = botInv.find(i => i.name === sellArgs && i.tradable && !CURRENCY_NAMES.has(i.name));
+      if (!item) { reply('❌ I don\'t have ' + sellArgs + ' in stock.'); break; }
 
-      const market = await getRefPrice(args);
-      if (!market) { reply('❌ No price for: ' + args); break; }
+      const market = await getRefPrice(sellArgs);
+      if (!market) { reply('❌ No price for: ' + sellArgs); break; }
       // Sell at market - 1 scrap, but never below cost + min_profit
       const opts2 = readOptions();
       const minP2 = Number(opts2.min_profit_ref ?? 0.11);
@@ -975,16 +979,16 @@ async function handleChatCommand(steamID, message) {
       const theirCurrency = buildCurrencyItems(sellRef, partnerInv);
       if (!theirCurrency) { reply('❌ You don\'t have enough currency. Price: ' + sellRef.toFixed(2) + ' ref'); break; }
 
-      reply('📨 Sending offer for ' + args + ' — price: ' + sellRef.toFixed(2) + ' ref...');
+      reply('📨 Sending offer for ' + sellArgs + ' — price: ' + sellRef.toFixed(2) + ' ref...');
       const offer = manager.createOffer(steamID.getSteamID64());
       offer.addMyItems([{ appid: 440, contextid: '2', assetid: item.assetid }]);
       offer.addTheirItems(theirCurrency);
-      offer.setMessage('TF2-HA Bot — selling ' + args);
+      offer.setMessage('TF2-HA Bot — selling ' + sellArgs);
       offer.send(err => {
         if (err) reply('❌ Failed to send offer: ' + err.message);
         else {
           reply('✅ Offer sent! Check your trade offers.');
-          pendingOffers.set(offer.id, { ts: Date.now(), desc: '!sell to ' + steamID.getSteamID64().slice(-6) + ': ' + args });
+          pendingOffers.set(offer.id, { ts: Date.now(), desc: '!sell to ' + steamID.getSteamID64().slice(-6) + ': ' + sellArgs });
           savePending();
         }
       });
