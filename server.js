@@ -766,6 +766,10 @@ async function getMarketSnapshot(name, apiKey) {
   if (median !== null)                  anchors.push(median - 0.11);          // safer vs lowballers
   if (highestBuy !== null)              anchors.push(highestBuy + 0.11);      // outbid current buyers by 1 scrap
   if (bpSell !== null)                  anchors.push(bpSell * 0.95);          // 5% safety buffer below IGetPrices
+  // truth anchor: buy ceiling can never exceed the expected sell price itself.
+  // This prevents the buy loop listing a price where truth - buyRef < minProfit
+  // (e.g. highestBuy anchor alone inflates ceiling above truth).
+  if (truth !== null)                   anchors.push(truth);
   const buyCeiling = anchors.length ? Math.min(...anchors) : 0;
 
   const snap = { truth, buyCeiling, confidence, sells, buyers: buyers.length, bpSell, cheapestSell, median, highestBuy, outlier };
@@ -904,12 +908,17 @@ async function priceItems(items, label, costs = {}) {
         // 1. Quality-aware IGetPrices lookup (Strange, NC variants)
         const bpE = getBpEntry(item);
         if (bpE) {
-          // For items the bot is GIVING (selling): use actual acquisition cost if
-          // we have it — this lets the bot accept trades where it sniped below
-          // community buy price and is selling above its own cost.
-          // Fall back to community buy price if no stored cost.
-          const storedCost = label === 'give' ? (costs[item.assetid] || 0) : 0;
-          ref = storedCost > 0 ? storedCost : bpE.buy;
+          if (label === 'give') {
+            // Bot is SELLING this item: value at acquisition cost (what we paid).
+            // Fall back to community buy price if no stored cost.
+            const storedCost = costs[item.assetid] || 0;
+            ref = storedCost > 0 ? storedCost : bpE.buy;
+          } else {
+            // Bot is RECEIVING this item (buying it): value at community SELL price
+            // (what we can resell it for), not buy price. This makes evaluateOffer
+            // consistent with buy-loop logic which targets bpE.sell as profit base.
+            ref = bpE.sell;
+          }
         } else if (isCraftHat(item) && craftHatPrice > 0) {
           // 2. Generic craft hat price (all craft hats trade at same bulk price)
           ref = craftHatPrice;
