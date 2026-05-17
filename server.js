@@ -211,6 +211,101 @@ function scheduleDailyReset() {
   }, midnight - now);
 }
 
+// ─── TF2 Schema (defindex ↔ item name) ───────────────────────────────────────
+
+const SCHEMA_CACHE_PATH = path.join(DATA_DIR, 'tf2hub-schema.json');
+const tf2NameToDefindex = new Map(); // 'Item Name' → defindex
+const tf2DefindexToName = new Map(); // defindex → 'Item Name'
+let tf2SchemaLoaded = false;
+
+async function loadTf2Schema() {
+  if (tf2SchemaLoaded) return;
+
+  // Try disk cache first (only changes on TF2 updates)
+  try {
+    const cached = JSON.parse(fs.readFileSync(SCHEMA_CACHE_PATH, 'utf8'));
+    if (Array.isArray(cached) && cached.length > 100) {
+      for (const { defindex, item_name } of cached) {
+        tf2NameToDefindex.set(item_name, defindex);
+        tf2DefindexToName.set(defindex, item_name);
+      }
+      tf2SchemaLoaded = true;
+      console.log('[tf2-hub] tf2 schema loaded from cache:', tf2NameToDefindex.size, 'items');
+      return;
+    }
+  } catch {}
+
+  // Fetch from Steam Web API (uses existing steam_api_key)
+  const opts = readOptions();
+  if (!opts.steam_api_key) { console.log('[tf2-hub] tf2 schema: no steam_api_key — skipped'); return; }
+
+  console.log('[tf2-hub] tf2 schema: fetching from Steam...');
+  const allItems = [];
+  let start = 0;
+  try {
+    while (true) {
+      const data = await httpsGet(
+        'https://api.steampowered.com/IEconItems_440/GetSchemaItems/v0001/?key='
+        + encodeURIComponent(opts.steam_api_key) + '&language=en&start=' + start
+      );
+      const items = data.result?.items || [];
+      for (const item of items) {
+        if (item.item_name == null || item.defindex == null) continue;
+        tf2NameToDefindex.set(item.item_name, item.defindex);
+        tf2DefindexToName.set(item.defindex, item.item_name);
+        allItems.push({ defindex: item.defindex, item_name: item.item_name });
+      }
+      const next = data.result?.next;
+      if (!next) break;
+      start = next;
+      await sleep(400);
+    }
+    tf2SchemaLoaded = true;
+    console.log('[tf2-hub] tf2 schema fetched:', tf2NameToDefindex.size, 'items');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(SCHEMA_CACHE_PATH, JSON.stringify(allItems));
+  } catch (err) {
+    console.error('[tf2-hub] tf2 schema fetch error:', err.message);
+  }
+}
+
+// ─── prices.tf ────────────────────────────────────────────────────────────────
+// Free token: sign in at https://prices.tf with Steam, copy your token from
+// the site. Add it as prices_tf_token in the addon config.
+
+const pricesTfCache = new Map(); // sku → { sell, buy, ts }
+const PRICES_TF_TTL = 30 * 60 * 1000;
+
+function itemNameToSku(name, quality = 6) {
+  const defindex = tf2NameToDefindex.get(name);
+  if (defindex == null) return null;
+  return defindex + ';' + quality;
+}
+
+async function getPricesTf(name, quality = 6) {
+  const opts = readOptions();
+  if (!opts.prices_tf_token) return null;
+  await loadTf2Schema();
+  const sku = itemNameToSku(name, quality);
+  if (!sku) return null;
+
+  const cached = pricesTfCache.get(sku);
+  if (cached && Date.now() - cached.ts < PRICES_TF_TTL) return cached;
+
+  try {
+    const data = await httpsGet(
+      'https://api.prices.tf/items/' + encodeURIComponent(sku),
+      { Authorization: 'Bearer ' + opts.prices_tf_token }
+    );
+    const sell = (data.sell?.keys || 0) * keyPriceRef + (data.sell?.metal || 0);
+    const buy  = (data.buy?.keys  || 0) * keyPriceRef + (data.buy?.metal  || 0);
+    if (!sell && !buy) return null;
+    const entry = { sell, buy, ts: Date.now() };
+    pricesTfCache.set(sku, entry);
+    return entry;
+  } catch { return null; }
+}
+
 // ─── Pricing ─────────────────────────────────────────────────────────────────
 
 let keyPriceRef = 65;
@@ -406,6 +501,9 @@ async function getRefPrice(name, marketName = name) {
     return cachedClassifieds.ref;
   // backpack.tf IGetPrices fallback (community price, can lag actual market)
   if (await loadBpPriceList() && bpPriceList.has(name)) return bpPriceList.get(name).sell;
+  // prices.tf fallback — covers items missing from IGetPrices (MvM parts, cases, war paints…)
+  const ptf = await getPricesTf(name);
+  if (ptf && ptf.sell > 0) { console.log('[tf2-hub] prices.tf price for ' + name + ': ' + ptf.sell.toFixed(2) + ' ref'); return ptf.sell; }
   // Steam Market fallback — use marketName (includes wear for decorated weapons)
   const usd = await getSteamMarketPrice(marketName);
   if (usd === null) return null;
@@ -2240,6 +2338,7 @@ server.listen(PORT, HOST, () => {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
   fetchKeyPrice().catch(() => {});
+  loadTf2Schema().catch(() => {}); // pre-load schema for prices.tf lookups
   login();
   scheduleDailyReset();
 

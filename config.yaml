@@ -25,6 +25,7 @@ options:
   steam_api_key: ""
   backpack_tf_token: ""
   backpack_tf_api_key: ""
+  prices_tf_token: ""
   min_profit_ref: 0.11
   accept_donations: false
   sync_interval_minutes: 15
@@ -48,6 +49,7 @@ schema:
   steam_api_key: str
   backpack_tf_token: password
   backpack_tf_api_key: password
+  prices_tf_token: password
   min_profit_ref: float(0,100)
   accept_donations: bool
   sync_interval_minutes: int(5,1440)
