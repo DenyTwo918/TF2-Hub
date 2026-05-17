@@ -591,14 +591,16 @@ async function getBuyMarketRef(name) {
 const marketSnapshotCache = new Map(); // name -> { snap, ts }
 const MARKET_SNAPSHOT_TTL = 15 * 60 * 1000;
 
-async function fetchSellListings(name, token, count = 5) {
+async function fetchSellListings(name, apiKey, count = 5) {
   // No quality or craftable filter — cases are non-craftable, decorated weapons are
   // quality 15, war paints vary.  Removing the filter finds all of them.
   // The median of top-5 results is robust enough to handle mixed-quality listings.
+  // NOTE: classifieds/search uses key= (API key), NOT token= (user token).
+  //       token= is only for listing management (create/delete).
   try {
     const data = await httpsGet(
-      'https://api.backpack.tf/api/classifieds/search/v1?token='
-      + encodeURIComponent(token)
+      'https://api.backpack.tf/api/classifieds/search/v1?key='
+      + encodeURIComponent(apiKey)
       + '&item=' + encodeURIComponent(name)
       + '&intent=sell&tradable=1&page_size=' + count
     );
@@ -610,11 +612,11 @@ async function fetchSellListings(name, token, count = 5) {
   } catch { return []; }
 }
 
-async function fetchBuyListings(name, token, count = 5) {
+async function fetchBuyListings(name, apiKey, count = 5) {
   try {
     const data = await httpsGet(
-      'https://api.backpack.tf/api/classifieds/search/v1?token='
-      + encodeURIComponent(token)
+      'https://api.backpack.tf/api/classifieds/search/v1?key='
+      + encodeURIComponent(apiKey)
       + '&item=' + encodeURIComponent(name)
       + '&intent=buy&tradable=1&craftable=1&quality=6&page_size=' + count
     );
@@ -630,7 +632,7 @@ function builtinSnapshot(ref) {
   return { truth: ref, buyCeiling: ref, confidence: 'high', sells: [ref], buyers: 99, bpSell: ref, cheapestSell: ref, median: ref, highestBuy: ref, outlier: false };
 }
 
-async function getMarketSnapshot(name, token) {
+async function getMarketSnapshot(name, apiKey) {
   // Built-in currencies
   switch (name) {
     case 'Mann Co. Supply Crate Key': return builtinSnapshot(keyPriceRef);
@@ -651,19 +653,20 @@ async function getMarketSnapshot(name, token) {
   const cached = marketSnapshotCache.get(name);
   if (cached && Date.now() - cached.ts < MARKET_SNAPSHOT_TTL) return cached.snap;
 
-  // No API token → degrade to IGetPrices only (low confidence)
+  // No API key → degrade to IGetPrices only (low confidence)
   const bpEntry = bpPriceList && bpPriceList.get(name);
   const bpSell = bpEntry ? bpEntry.sell : null;
-  if (!token) {
+  if (!apiKey) {
     if (bpSell === null) return null;
     return { truth: bpSell, buyCeiling: bpSell * 0.85, confidence: 'low', sells: [bpSell], buyers: 0, bpSell, cheapestSell: null, median: bpSell, highestBuy: null, outlier: false };
   }
 
   // Fetch live classifieds (both sides), populate legacy caches as a side-effect
+  // classifieds/search uses key= (API key), not token= (user token)
   await sleep(300);
-  const sells = await fetchSellListings(name, token, 5);
+  const sells = await fetchSellListings(name, apiKey, 5);
   await sleep(300);
-  const buyers = await fetchBuyListings(name, token, 5);
+  const buyers = await fetchBuyListings(name, apiKey, 5);
 
   if (sells.length > 0) {
     classifiedsSellCache.set(name, { ref: sells[0], ts: Date.now() });
@@ -1136,7 +1139,7 @@ async function evaluateOffer(offer) {
   // Each snapshot fuses cheapest sell, median of top 5, highest buy, and IGetPrices
   // into a confidence-rated view.  populated here so priceItems and the hard-safety
   // checks below all see fresh, consistent data.
-  const apiToken = opts.backpack_tf_token;
+  const apiToken = opts.backpack_tf_api_key; // classifieds search uses key=, not token=
   const offerItems = [...new Set(
     [...offer.itemsToGive, ...offer.itemsToReceive]
       .filter(i => !CURRENCY_NAMES.has(i.name))
@@ -1325,15 +1328,15 @@ function chatCmd(name) { return name.replace(/ /g, '_'); }
 // secondCheapest for buy ceiling (avoids one lowball bot tanking the whole market).
 // Excludes our own bot's listings.
 const classifiedsSellCacheSecond = new Map(); // name -> { ref, ts }  (2nd cheapest)
-async function getCheapestSellRef(name, token) {
+async function getCheapestSellRef(name, apiKey) {
   // Return from cache if fresh
   const cached = classifiedsSellCache.get(name);
   if (cached && Date.now() - cached.ts < CLASSIFIEDS_PRICE_TTL) return cached.ref;
 
   try {
     const data = await httpsGet(
-      'https://api.backpack.tf/api/classifieds/search/v1?token='
-      + encodeURIComponent(token)
+      'https://api.backpack.tf/api/classifieds/search/v1?key='
+      + encodeURIComponent(apiKey)
       + '&item=' + encodeURIComponent(name)
       + '&intent=sell&tradable=1&page_size=6'
     );
@@ -1357,14 +1360,14 @@ async function getCheapestSellRef(name, token) {
 // We want to outbid this by 1 scrap to be the most attractive buyer.
 // Excludes our own bot's buy listings.
 const classifiedsBuyCache = new Map(); // name -> { ref, ts }
-async function getHighestBuyRef(name, token) {
+async function getHighestBuyRef(name, apiKey) {
   const cached = classifiedsBuyCache.get(name);
   if (cached && Date.now() - cached.ts < CLASSIFIEDS_PRICE_TTL) return cached.ref;
 
   try {
     const data = await httpsGet(
-      'https://api.backpack.tf/api/classifieds/search/v1?token='
-      + encodeURIComponent(token)
+      'https://api.backpack.tf/api/classifieds/search/v1?key='
+      + encodeURIComponent(apiKey)
       + '&item=' + encodeURIComponent(name)
       + '&intent=buy&tradable=1&craftable=1&quality=6&page_size=5'
     );
@@ -1432,7 +1435,9 @@ async function _syncInventoryListings() {
   const baseMinProfit = Number(opts.min_profit_ref ?? 0.11);
   const dynamicPct = Number(opts.dynamic_profit_pct ?? 3);
   const costs = readCosts();
-  const apiToken = opts.backpack_tf_token; // classifieds search requires user token, not api key
+  // classifieds/search uses the API key (key=), NOT the user token.
+  // The user token (token=) is only for listing management (create/delete).
+  const apiToken = opts.backpack_tf_api_key;
 
   try {
     // Fetch bot's TF2 inventory
@@ -1895,8 +1900,9 @@ function buildCurrencyItems(refNeeded, inventory) {
 
 async function snipeClassifieds() {
   const opts = readOptions();
-  const token = opts.backpack_tf_token; // classifieds search requires user token, not api key
-  if (!token) return;
+  // classifieds/search uses key= (API key), NOT token= (user token)
+  const apiKey = opts.backpack_tf_api_key;
+  if (!apiKey) return;
 
   const configItems = (opts.buy_items || '').split(',').map(s => s.trim()).filter(Boolean);
   const buyItems = configItems.length ? configItems : await computeLiquidItems();
@@ -1937,8 +1943,8 @@ async function snipeClassifieds() {
 
     try {
       const data = await httpsGet(
-        'https://api.backpack.tf/api/classifieds/search/v1?token='
-        + encodeURIComponent(token)
+        'https://api.backpack.tf/api/classifieds/search/v1?key='
+        + encodeURIComponent(apiKey)
         + '&item=' + encodeURIComponent(name)
         + '&intent=sell&tradable=1&craftable=1&quality=6&page_size=10'
       );
@@ -2230,8 +2236,9 @@ server.on('error', err => {
 // This means the bot doesn't just wait for buyers — it hunts them down.
 async function snipeBuyOrders() {
   const opts = readOptions();
-  const token = opts.backpack_tf_token; // classifieds search requires user token, not api key
-  if (!token) return;
+  // classifieds/search uses key= (API key), NOT token= (user token)
+  const apiKey = opts.backpack_tf_api_key;
+  if (!apiKey) return;
   console.log('[tf2-hub] sell-snipe: scanning buy orders...');
   let snipeErrors = 0;
 
@@ -2259,8 +2266,8 @@ async function snipeBuyOrders() {
 
     try {
       const data = await httpsGet(
-        'https://api.backpack.tf/api/classifieds/search/v1?token='
-        + encodeURIComponent(token)
+        'https://api.backpack.tf/api/classifieds/search/v1?key='
+        + encodeURIComponent(apiKey)
         + '&item=' + encodeURIComponent(item.name)
         + '&intent=buy&tradable=1&page_size=10'
       );
