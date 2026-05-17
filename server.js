@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.7';
+const VERSION = '1.8.8';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -339,6 +339,7 @@ let keyPriceUsd = null;
 // Each entry: { buy, sell, lastUpdate }
 let bpPriceList = null;
 let bpPriceListTs = 0;
+let bpPriceListFailTs = 0;      // timestamp of last failed fetch — backs off for BP_PRICE_TTL
 const BP_PRICE_TTL = 60 * 60 * 1000;
 
 // Auto-selected liquid items (populated when buy_items config is empty)
@@ -350,6 +351,8 @@ async function loadBpPriceList() {
   const opts = readOptions();
   if (!opts.backpack_tf_api_key) return false;
   if (bpPriceList && Date.now() - bpPriceListTs < BP_PRICE_TTL) return true;
+  // Don't hammer the endpoint after a failure — back off for one TTL period
+  if (!bpPriceList && bpPriceListFailTs && Date.now() - bpPriceListFailTs < BP_PRICE_TTL) return false;
 
   try {
     const data = await httpsGet(
@@ -392,7 +395,8 @@ async function loadBpPriceList() {
     autoLiquidTs = 0;
     return true;
   } catch (err) {
-    console.error('[tf2-hub] bp price list error:', err.message);
+    bpPriceListFailTs = Date.now();
+    console.error('[tf2-hub] bp price list error:', err.message, '— skipping retries for 1h');
     return false;
   }
 }

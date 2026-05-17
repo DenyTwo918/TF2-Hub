@@ -1,6 +1,6 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "1.8.7"
+version: "1.8.8"
 description: Autonomous TF2 trading bot — monitors trade offers and accepts profitable ones 24/7.
 url: https://github.com/DenyTwo918/TF2-Hub
 arch:
