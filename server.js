@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.10';
+const VERSION = '1.9.0';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -887,6 +887,58 @@ function isCraftHat(item) {
   return true;
 }
 
+// TF2 quality IDs that ALWAYS need manual/community-validated pricing.
+// Unusual (5) — effect matters, $$$ variance
+// Haunted (13) — limited supply, special pricing
+// Collector's (14) — chemistry-set crafted, premium price
+const SPECIAL_QUALITIES = new Set([5, 13, 14]);
+
+// Returns true when an item's value can't be safely inferred from automatic
+// pricing (pricedb / Steam Market) — i.e. the bot should refuse to list it or
+// accept it in a trade without a manual price override or recorded cost.
+//
+// Triggers:
+//   - Unusual / Haunted / Collector's quality
+//   - Strange (q11) when bpPriceList is unavailable (no quality-aware price)
+//   - Australium weapons (name contains "Australium ")
+//   - Killstreak / Spec KS / Pro KS weapons (name prefix or descriptions)
+//   - Festivized / Festive variants (re-skins with their own pricing)
+//   - Items with attached paint / spells / strange parts (extra value not in base price)
+function requiresManualPrice(item) {
+  const q = item.quality || 6;
+  if (SPECIAL_QUALITIES.has(q)) return true;
+  if (q === 11 && !bpPriceList) return true;  // Strange without IGetPrices — base name only
+
+  const name = item.name || '';
+  if (/\bAustralium\b/.test(name)) return true;
+  if (/^Festivized\b/.test(name)) return true;
+  if (/^Festive\s/.test(name)) return true;
+  // Killstreak weapon variants (NOT "Killstreak Kit" / "Killstreak Fabricator" — those are tools)
+  if (/Killstreak/i.test(name) && !/Killstreak (Kit|Fabricator)/i.test(name)) return true;
+
+  if (Array.isArray(item.descriptions)) {
+    for (const d of item.descriptions) {
+      const v = String(d.value || '');
+      if (/^Paint Color:/i.test(v)) return true;
+      if (/Halloween Spell|Halloween:|Voices from Below|Pumpkin Bombs|Halloween Fire|Exorcism|Bruised Purple|Putrescent Pigmentation|Spectral|Sinister|Chromatic Corruption|Die Job|Gourd-O-Lantern/i.test(v)) return true;
+      if (/Strange Part:/i.test(v)) return true;
+      if (/^Sheen:/i.test(v) || /^Killstreaker:/i.test(v)) return true;
+    }
+  }
+  return false;
+}
+
+// Combined manual-price lookup: YAML config price_overrides + dashboard UI overrides.
+// Returns the override price (ref) or null if no override exists.
+function getManualPrice(itemName) {
+  const opts = readOptions();
+  const ovr = parsePriceOverrides(opts.price_overrides);
+  if (ovr[itemName] !== undefined) return Number(ovr[itemName]);
+  const ui = (readState().ui_price_overrides) || {};
+  if (ui[itemName] !== undefined) return Number(ui[itemName]);
+  return null;
+}
+
 // Quality-aware IGetPrices lookup.  Returns the bpPriceList entry for the item
 // taking quality (Strange = 11) and craftability into account.
 function getBpEntry(item) {
@@ -911,9 +963,19 @@ async function priceItems(items, label, costs = {}) {
       case 'Reclaimed Metal':           ref = 1 / 3; break;
       case 'Scrap Metal':               ref = 1 / 9; break;
       default: {
+        // 0. Manual price override (config or dashboard) — highest priority
+        const manualRef = getManualPrice(item.name);
         // 1. Quality-aware IGetPrices lookup (Strange, NC variants)
         const bpE = getBpEntry(item);
-        if (bpE) {
+        if (manualRef !== null && manualRef > 0) {
+          // For give: max(cost, override) so we never undervalue what we're handing out
+          // For recv: override is the ceiling — we won't pay more than configured
+          const storedCost = costs[item.assetid] || 0;
+          ref = (label === 'give') ? Math.max(storedCost, manualRef) : manualRef;
+        } else if (requiresManualPrice(item)) {
+          // Special quality / KS / Australium / spelled / painted — refuse to price
+          // automatically without manual override.  ref stays null → unknown → decline.
+        } else if (bpE) {
           if (label === 'give') {
             // Bot is SELLING this item: value at acquisition cost (what we paid).
             // Fall back to community buy price if no stored cost.
@@ -1374,13 +1436,25 @@ async function evaluateOffer(offer) {
 
     // 2. Per-item floor: never pay >= cheapest competitor sell - minProfit
     // This is the catch-all that prevents the 2.44-ref-for-2.22-ref-item bleed.
+    // When snapshot is unavailable (no API key), fall back to manual override or
+    // pricedb as the floor — never bypass the check just because data is missing.
     if (action === 'accept' && recvNonCurrency.length && give.total > 0) {
       const perItemPaid = give.total / recvNonCurrency.length;
       for (const item of recvNonCurrency) {
         const snap = snapshots.get(item.name);
-        if (!snap) continue;
-        const resaleFloor = snap.cheapestSell ?? snap.median ?? snap.truth;
-        if (!resaleFloor) continue;
+        let resaleFloor = snap ? (snap.cheapestSell ?? snap.median ?? snap.truth) : null;
+        // No snapshot data — try manual override, then pricedb fallback
+        if (!resaleFloor) resaleFloor = getManualPrice(item.name);
+        if (!resaleFloor) resaleFloor = await getRefPrice(item.name).catch(() => null);
+        // Still no floor AND item requires manual price → decline outright (can't verify)
+        if (!resaleFloor) {
+          if (requiresManualPrice(item)) {
+            action = 'decline';
+            reason = 'no resale floor for ' + item.name + ' (set price_override to enable)';
+            break;
+          }
+          continue;
+        }
         if (perItemPaid >= resaleFloor - minProfit) {
           action = 'decline';
           reason = 'overpay: ' + perItemPaid.toFixed(2) + ' >= floor ' + resaleFloor.toFixed(2) + ' for ' + item.name;
@@ -1461,6 +1535,14 @@ async function tryCounterOffer(offer, give, recv, minProfit) {
   // Only counter pure currency-for-items offers (most common case: buying our item)
   if (!offer.itemsToReceive.every(i => CURRENCY_NAMES.has(i.name))) return false;
   if (!offer.itemsToGive.length) return false;
+  // Never counter if any give-item requires manual pricing — our give.total is suspect
+  // and the counter price would be wrong by the same amount.
+  if (offer.itemsToGive.some(requiresManualPrice)) {
+    console.log('[tf2-hub] skip-counter: items need manual pricing —', offer.itemsToGive.filter(requiresManualPrice).map(i => i.name).join(', '));
+    return false;
+  }
+  // Also bail if any items were unpriced
+  if (give.unknown.length || recv.unknown.length) return false;
 
   try {
     const partnerInventory = await new Promise((resolve, reject) =>
@@ -1637,6 +1719,10 @@ async function _syncInventoryListings() {
     const stockCount = {};
     inventory.forEach(i => { if (i.tradable && !CURRENCY_NAMES.has(i.name)) stockCount[i.name] = (stockCount[i.name] || 0) + 1; });
 
+    // Hoisted once: dashboard UI overrides + YAML config overrides (re-read at loop top is wasteful)
+    const uiOverrides = (readState().ui_price_overrides) || {};
+    const cfgOverrides = parsePriceOverrides(opts.price_overrides);
+
     // SELL — one listing per unique item name.
     // Price = cheapest competitor listing - 1 scrap (auto-undercut).
     // If item listed >24h without selling, drop by another scrap (stale reprice).
@@ -1644,42 +1730,15 @@ async function _syncInventoryListings() {
     for (const item of inventory) {
       if (!item.tradable || CURRENCY_NAMES.has(item.name) || seen.has(item.name)) continue;
 
-
-      // ── Weapons: list at the standard 0.05 ref weapon floor ─────────────────
-      // Stock weapons have no meaningful market value; their trade-up value is
-      // 0.5 scrap ≈ 0.05 ref.  BUT weapon RESKINS (e.g. Bat Outta Hell, Holy
-      // Mackerel, Saxxy, Festive weapons) share the same slot tags yet have real
-      // market prices — detect them via IGetPrices and fall through to normal
-      // pricing if priced.  If bpPriceList is unavailable (API key banned/invalid),
-      // don't assume 0.05 — fall through to pricedb/Steam Market instead.
-      if (isWeapon(item)) {
-        const bpE = getBpEntry(item);
-        const bpSellRef = bpE ? bpE.sell : 0;
-        if (bpSellRef >= 0.11) {
-          // Has a real IGetPrices price → treat as a normal item, not a stock weapon
-        } else if (bpPriceList !== null) {
-          // Price list is loaded and has no entry for this weapon → truly a stock weapon
-          listings.push({
-            id: parseInt(item.assetid),
-            currencies: { keys: 0, metal: 0.05 },
-            details: '✅ AUTO-ACCEPT | 0.05 ref | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
-            buyout: true,
-            offers: true,
-          });
-          seen.add(item.name);
-          continue;
-        }
-      }
-
       // For everything else: try IGetPrices first (instant, no rate-limit),
       // then fall back to a live classifieds fetch if the item isn't in the price list.
       // Pass the Steam Market hash name (includes wear for decorated weapons/war paints).
       const mktHash = itemMarketHashName(item);
 
-      // Check for a manual UI price override — if set, use it directly and skip all
-      // undercut / stale-reprice logic so the override is actually respected.
-      const uiOverrides = (readState().ui_price_overrides) || {};
-      const manualOverride = uiOverrides[item.name];
+      // ── 1. Manual price override (UI dashboard or YAML config) — highest priority
+      const manualOverride = uiOverrides[item.name] !== undefined ? uiOverrides[item.name]
+                          : cfgOverrides[item.name] !== undefined ? cfgOverrides[item.name]
+                          : undefined;
       if (manualOverride !== undefined) {
         const sellRef = +Number(manualOverride).toFixed(2);
         if (sellRef < 0.11) {
@@ -1704,6 +1763,55 @@ async function _syncInventoryListings() {
         continue;
       }
 
+      // ── 2. Special-quality gate ──────────────────────────────────────────────
+      // Unusual / Haunted / Collector's / Strange-without-IGetPrices / Australium /
+      // Killstreak / Festivized / spelled / painted / strange-parted items can NEVER
+      // be priced safely from automatic sources alone — the price varies wildly with
+      // attached attributes that pricedb/Steam Market don't capture.  Require an
+      // explicit price override (and log them so the user can set one).
+      if (requiresManualPrice(item)) {
+        const reasons = [];
+        const q = item.quality || 6;
+        if (SPECIAL_QUALITIES.has(q)) reasons.push('q=' + q);
+        if (q === 11 && !bpPriceList) reasons.push('Strange (no bp.tf)');
+        if (/\bAustralium\b/.test(item.name || '')) reasons.push('Australium');
+        if (/Killstreak/i.test(item.name || '') && !/Killstreak (Kit|Fabricator)/i.test(item.name || '')) reasons.push('Killstreak');
+        if (/^Festivized\b/.test(item.name || '')) reasons.push('Festivized');
+        if (/^Festive\s/.test(item.name || '')) reasons.push('Festive');
+        if (Array.isArray(item.descriptions)) {
+          if (item.descriptions.some(d => /^Paint Color:/i.test(String(d.value || '')))) reasons.push('painted');
+          if (item.descriptions.some(d => /Halloween Spell|Halloween:|Voices from Below|Spectral|Sinister|Chromatic Corruption|Die Job/i.test(String(d.value || '')))) reasons.push('spelled');
+          if (item.descriptions.some(d => /Strange Part:/i.test(String(d.value || '')))) reasons.push('strange-part');
+        }
+        console.log('[tf2-hub] skip-special ' + item.name + ' [' + reasons.join(', ') + '] — set price_override to list');
+        seen.add(item.name);
+        continue;
+      }
+
+      // ── 3. Weapons: list at the standard 0.05 ref weapon floor ──────────────
+      // Stock weapons have no meaningful market value (trade-up value 0.5 scrap ≈ 0.05 ref).
+      // Only apply when bpPriceList is loaded AND has no entry for this weapon —
+      // otherwise we'd misprice Festive/KS/reskins as 0.05 ref.
+      if (isWeapon(item)) {
+        const bpE = getBpEntry(item);
+        const bpSellRef = bpE ? bpE.sell : 0;
+        if (bpSellRef >= 0.11) {
+          // Has a real IGetPrices price → treat as a normal item, not a stock weapon
+        } else if (bpPriceList !== null) {
+          listings.push({
+            id: parseInt(item.assetid),
+            currencies: { keys: 0, metal: 0.05 },
+            details: '✅ AUTO-ACCEPT | 0.05 ref | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
+            buyout: true,
+            offers: true,
+          });
+          seen.add(item.name);
+          continue;
+        }
+        // bpPriceList null + no manualOverride: fall through to pricedb/Steam Market
+      }
+
+      // ── 4. Normal pricing ──────────────────────────────────────────────────
       // Quality-aware price: try getBpEntry first (handles Strange q11, NC q6)
       // then fall back to getRefPrice (classifieds cache / IGetPrices / PriceDB / Steam)
       const bpItemEntry = getBpEntry(item);
@@ -1717,7 +1825,22 @@ async function _syncInventoryListings() {
         continue;
       }
       const cost = costs[item.assetid] || 0;
-      const minProfit = effectiveMinProfit(market, baseMinProfit, dynamicPct);
+
+      // ── 5. Cost-zero guard ─────────────────────────────────────────────────
+      // Without recorded cost, minSell = minProfit only (e.g. 0.11 ref).  For items
+      // worth a key or more this could let the bot sell them way too cheap if market
+      // data is stale.  Refuse to list expensive items without a cost — user must set
+      // a price_override or trade the item once to record cost.
+      if (cost === 0 && market > keyPriceRef) {
+        console.log('[tf2-hub] skip-no-cost ' + item.name + ' (market=' + market.toFixed(2) + ' ref > 1 key, no recorded cost) — set price_override to list safely');
+        seen.add(item.name);
+        continue;
+      }
+
+      // Apply low-confidence margin multiplier when bp.tf price list is unavailable.
+      // Pricedb/Steam Market can be stale or misleading — demand more headroom.
+      const lowConfMul = bpPriceList ? 1 : 2;
+      const minProfit = effectiveMinProfit(market, baseMinProfit, dynamicPct) * lowConfMul;
       const minSell = +(cost + minProfit).toFixed(2);
 
       // Set firstListedAt the first time we see this item — never reset unless sold
