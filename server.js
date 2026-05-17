@@ -2581,7 +2581,9 @@ server.listen(PORT, HOST, () => {
   setInterval(syncListings, syncMs);
   setInterval(fetchKeyPrice, 6 * 60 * 60 * 1000);
   setInterval(() => syncInventoryListings().catch(() => {}), 15 * 60 * 1000); // every 15min = auto-bump
-  setInterval(() => guardedSync(snipeClassifieds, 'snipe-classifieds').catch(() => {}), 90 * 1000);
+  // snipeClassifieds disabled — bp.tf /search/v1 requires WebSocket now;
+  // REST polling caused account ban. Buy listings handle purchasing instead.
+  // setInterval(() => guardedSync(snipeClassifieds, 'snipe-classifieds').catch(() => {}), 90 * 1000);
   setInterval(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders').catch(() => {}), 5 * 60 * 1000); // sell to buy-order bots every 5min
   setTimeout(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders-first').catch(() => {}), 60 * 1000); // first run 60s after startup (let login settle)
 
