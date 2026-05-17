@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.1';
+const VERSION = '1.8.2';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1546,7 +1546,7 @@ async function syncListings() {
   const opts = readOptions();
   if (!opts.backpack_tf_token) return;
   const doFetch = () => httpsGet(
-    'https://api.backpack.tf/api/classifieds/listings/v1?token=' + encodeURIComponent(opts.backpack_tf_token)
+    'https://api.backpack.tf/api/v2/classifieds/listings?token=' + encodeURIComponent(opts.backpack_tf_token) + '&skip=0&limit=200'
   );
   try {
     let data;
@@ -1559,7 +1559,9 @@ async function syncListings() {
       await sleep(20000);
       data = await doFetch();
     }
-    const listings = Object.values(data.listings || {}).slice(0, 500);
+    // v2 returns {listings: [...], total: N}; v1 returned {listings: {id: {...}}}
+    const raw = data.listings || data.results || [];
+    const listings = (Array.isArray(raw) ? raw : Object.values(raw)).slice(0, 500);
     const state = readState();
     state.listings = listings;
     state.listings_count = listings.length;
@@ -1643,8 +1645,8 @@ async function _syncInventoryListings() {
           const metal = snapToScrap(sellRef - keys * keyPriceRef);
           const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
           listings.push({
-            intent: 1,
-            id: item.assetid,
+            intent: 'sell',
+            id: '440_' + item.assetid,
             currencies: { keys, metal },
             details: '🎩 CRAFT HAT | ' + priceStr + ' | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
           });
@@ -1666,8 +1668,8 @@ async function _syncInventoryListings() {
           // Has a real IGetPrices price → treat as a normal item, not a stock weapon
         } else {
           listings.push({
-            intent: 1,
-            id: item.assetid,
+            intent: 'sell',
+            id: '440_' + item.assetid,
             currencies: { keys: 0, metal: 0.05 },
             details: '✅ AUTO-ACCEPT | 0.05 ref | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
           });
@@ -1699,8 +1701,8 @@ async function _syncInventoryListings() {
         const metal = +(sellRef - keys * keyPriceRef).toFixed(2);
         const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
         listings.push({
-          intent: 1,
-          id: item.assetid,
+          intent: 'sell',
+          id: '440_' + item.assetid,
           currencies: { keys, metal },
           details: '✅ AUTO-ACCEPT | ' + priceStr + ' [override] | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
         });
@@ -1796,8 +1798,8 @@ async function _syncInventoryListings() {
         + ' bp=' + (getBpEntry(item)?.sell?.toFixed(2) ?? '—')
         + ' comp=' + (cheapestComp?.toFixed(2) ?? '—'));
       listings.push({
-        intent: 1,
-        id: item.assetid,
+        intent: 'sell',
+        id: '440_' + item.assetid,
         currencies: { keys, metal },
         details: '✅ AUTO-ACCEPT | ' + priceStr + ' | Stock: ' + (stockCount[item.name] || 1) + ' | Chat: sell_' + chatCmd(item.name),
       });
@@ -1949,7 +1951,7 @@ async function _syncInventoryListings() {
       const metal = +(buyRef - keys * keyPriceRef).toFixed(2);
       const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
       listings.push({
-        intent: 0,
+        intent: 'buy',
         item: { quality: 6, item_name: name, craftable: 1 },
         currencies: { keys, metal },
         details: '💰 BUYING | ' + priceStr + ' | Stock: ' + (stockCount[name] || 0) + '/' + itemMaxStock + ' | Chat: buy_' + chatCmd(name),
@@ -1978,13 +1980,13 @@ async function _syncInventoryListings() {
       if (metalOnlyRef > maxRef) {
         // Excess metal → buy keys (convert metal to keys at slight discount)
         const keyBuyMetal = +(keyPriceRef - 0.11).toFixed(2);
-        listings.push({ intent: 0, item: { quality: 6, item_name: 'Mann Co. Supply Crate Key', craftable: 1 }, currencies: { keys: 0, metal: keyBuyMetal }, details: '🔑 AUTO-BUY BOT | Buying keys instantly!' });
+        listings.push({ intent: 'buy', item: { quality: 6, item_name: 'Mann Co. Supply Crate Key', craftable: 1 }, currencies: { keys: 0, metal: keyBuyMetal }, details: '🔑 AUTO-BUY BOT | Buying keys instantly!' });
         console.log('[tf2-hub] autokeys: buying keys (metal ' + metalOnlyRef.toFixed(1) + ' ref > max ' + maxRef + ')');
       } else if (metalOnlyRef < minRef) {
         // Low metal → sell a key for refined
         const keyItem = inventory.find(i => i.name === 'Mann Co. Supply Crate Key' && i.tradable);
         if (keyItem) {
-          listings.push({ intent: 1, id: keyItem.assetid, currencies: { keys: 0, metal: keyPriceRef }, details: '🔑 AUTO-SELL BOT | Selling key for metal!' });
+          listings.push({ intent: 'sell', id: '440_' + keyItem.assetid, currencies: { keys: 0, metal: keyPriceRef }, details: '🔑 AUTO-SELL BOT | Selling key for metal!' });
           console.log('[tf2-hub] autokeys: selling key (metal ' + metalOnlyRef.toFixed(1) + ' ref < min ' + minRef + ')');
         }
       }
@@ -2005,8 +2007,8 @@ async function _syncInventoryListings() {
     if (!listings.length) { console.log('[tf2-hub] inventory: nothing to list'); return; }
 
     const postListings = async () => httpsPost(
-      'https://api.backpack.tf/api/classifieds/list/v1?token=' + encodeURIComponent(opts.backpack_tf_token),
-      { listings },
+      'https://api.backpack.tf/api/v2/classifieds/listings/batch?token=' + encodeURIComponent(opts.backpack_tf_token),
+      listings,  // v2: send array directly (no {listings:[...]} wrapper)
       { 'X-Auth-Token': opts.backpack_tf_token }
     );
     let result;
@@ -2020,8 +2022,11 @@ async function _syncInventoryListings() {
       } else { throw e; }
     }
 
-    const created = result.listings ? Object.values(result.listings).filter(l => !l.error).length : listings.length;
-    const errors  = result.listings ? Object.values(result.listings).filter(l =>  l.error).length : 0;
+    // v2 returns array of results; v1 returned {listings: {id: {error?}}}
+    const resultArr = Array.isArray(result) ? result
+      : result.listings ? (Array.isArray(result.listings) ? result.listings : Object.values(result.listings)) : [];
+    const created = resultArr.length ? resultArr.filter(l => !l.error).length : listings.length;
+    const errors  = resultArr.filter(l => l.error).length;
     console.log('[tf2-hub] listings posted:', created, 'ok' + (errors ? ', ' + errors + ' errors' : ''));
     // Save posted listings to state immediately so the dashboard can show them right away.
     // Also schedule a bp.tf fetch after 15s to get accurate listing IDs/status.
@@ -2030,7 +2035,8 @@ async function _syncInventoryListings() {
       intent: l.intent,
       currencies: l.currencies,
       active: true,
-      item: { name: inventory.find(i => i.assetid === l.id)?.name || '' }
+      // sell listings: id is '440_{assetid}'; buy listings: use item_name
+      item: { name: inventory.find(i => ('440_' + i.assetid) === l.id)?.name || l.item?.item_name || '' }
     }));
     writeState(st);
     setTimeout(() => syncListings().catch(() => {}), 15000);
@@ -2214,14 +2220,12 @@ async function snipeClassifieds() {
 async function deleteAllListings() {
   const opts = readOptions();
   if (!opts.backpack_tf_token) return;
-  const state = readState();
-  const ids = (state.listings || []).map(l => l.id).filter(Boolean);
-  if (!ids.length) { console.log('[tf2-hub] no listings to delete'); return; }
-  console.log('[tf2-hub] deleting', ids.length, 'listings before shutdown...');
+  console.log('[tf2-hub] deleting all listings before shutdown...');
   try {
+    // v2 DELETE /classifieds/listings with no body removes ALL of the bot's listings
     await httpsDelete(
-      'https://api.backpack.tf/api/v2/classifieds/listings',
-      { listing_ids: ids },
+      'https://api.backpack.tf/api/v2/classifieds/listings?token=' + encodeURIComponent(opts.backpack_tf_token),
+      null,
       { 'X-Auth-Token': opts.backpack_tf_token }
     );
     console.log('[tf2-hub] all listings deleted');
