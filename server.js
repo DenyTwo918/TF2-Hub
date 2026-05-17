@@ -5,6 +5,23 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+// ─── Timestamped logging ─────────────────────────────────────────────────────
+// Prefix every console.log / console.error line with HH:MM:SS so the HA log
+// viewer and saved log files have human-readable times on every entry.
+{
+  const _log = console.log.bind(console);
+  const _err = console.error.bind(console);
+  const ts = () => {
+    const d = new Date();
+    return '[' + String(d.getHours()).padStart(2,'0') + ':'
+               + String(d.getMinutes()).padStart(2,'0') + ':'
+               + String(d.getSeconds()).padStart(2,'0') + ']';
+  };
+  console.log   = (...a) => _log(ts(), ...a);
+  console.error = (...a) => _err(ts(), ...a);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const SteamUser = require('steam-user');
 const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
@@ -1362,7 +1379,12 @@ async function evaluateOffer(offer) {
     profit: +profit.toFixed(4),
   };
   appendOffer(entry);
-  console.log('[tf2-hub] offer', offer.id, '→', action, '—', reason);
+  const giveNames = offer.itemsToGive.map(i => i.name).join(', ') || '—';
+  const recvNames = offer.itemsToReceive.map(i => i.name).join(', ') || '—';
+  console.log('[tf2-hub] offer', offer.id, '→', action, '—', reason,
+    '| give:', give.total.toFixed(2) + 'ref [' + giveNames + ']',
+    '| recv:', recv.total.toFixed(2) + 'ref [' + recvNames + ']',
+    '| profit:', profit.toFixed(2) + 'ref');
 
   if (action === 'accept') {
     appState.accepted_today++;
@@ -1750,6 +1772,11 @@ async function _syncInventoryListings() {
       const keys  = Math.floor(sellRef / keyPriceRef);
       const metal = snapToScrap(sellRef - keys * keyPriceRef);
       const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
+      const cost = costs[item.assetid] || 0;
+      console.log('[tf2-hub] sell-list ' + item.name + ': ' + sellRef.toFixed(2) + ' ref'
+        + (cost ? ' (cost ' + cost.toFixed(2) + ' ref, margin ' + (sellRef - cost).toFixed(2) + ' ref)' : ' (cost unknown)')
+        + ' bp=' + (getBpEntry(item)?.sell?.toFixed(2) ?? '—')
+        + ' comp=' + (cheapestComp?.toFixed(2) ?? '—'));
       listings.push({
         intent: 1,
         id: item.assetid,
@@ -1861,6 +1888,7 @@ async function _syncInventoryListings() {
       // Gate 2: low confidence — only skip if not whitelisted AND no IGetPrices data at all
       if (snap.confidence === 'low' && !whitelist.has(name) && snap.bpSell === null) {
         skipLowConf++;
+        console.log('[tf2-hub] skip buy ' + name + ': low-conf, no bp.tf price');
         continue;
       }
       // Gate 3: require ≥2 active buyers OR a confirmed IGetPrices community price.
@@ -1869,6 +1897,7 @@ async function _syncInventoryListings() {
       // bpSell !== null means the item has a community-consensus price → it trades.
       if (snap.buyers < 2 && snap.bpSell === null && !whitelist.has(name)) {
         skipNoBuyers++;
+        console.log('[tf2-hub] skip buy ' + name + ': buyers=' + snap.buyers + ', no bp.tf price');
         continue;
       }
       // Gate 4: per-trade value cap
