@@ -27,7 +27,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.8.9';
+const VERSION = '1.8.10';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -1648,14 +1648,17 @@ async function _syncInventoryListings() {
       // ── Weapons: list at the standard 0.05 ref weapon floor ─────────────────
       // Stock weapons have no meaningful market value; their trade-up value is
       // 0.5 scrap ≈ 0.05 ref.  BUT weapon RESKINS (e.g. Bat Outta Hell, Holy
-      // Mackerel, Saxxy) share the same slot tags yet have real market prices —
-      // detect them via IGetPrices and fall through to normal pricing if priced.
+      // Mackerel, Saxxy, Festive weapons) share the same slot tags yet have real
+      // market prices — detect them via IGetPrices and fall through to normal
+      // pricing if priced.  If bpPriceList is unavailable (API key banned/invalid),
+      // don't assume 0.05 — fall through to pricedb/Steam Market instead.
       if (isWeapon(item)) {
         const bpE = getBpEntry(item);
         const bpSellRef = bpE ? bpE.sell : 0;
         if (bpSellRef >= 0.11) {
           // Has a real IGetPrices price → treat as a normal item, not a stock weapon
-        } else {
+        } else if (bpPriceList !== null) {
+          // Price list is loaded and has no entry for this weapon → truly a stock weapon
           listings.push({
             id: parseInt(item.assetid),
             currencies: { keys: 0, metal: 0.05 },
