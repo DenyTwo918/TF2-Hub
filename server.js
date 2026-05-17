@@ -217,8 +217,16 @@ const SCHEMA_CACHE_PATH = path.join(DATA_DIR, 'tf2hub-schema.json');
 const tf2NameToDefindex = new Map(); // 'Item Name' → defindex
 const tf2DefindexToName = new Map(); // defindex → 'Item Name'
 let tf2SchemaLoaded = false;
+let tf2SchemaFetching = null; // Promise — prevents concurrent fetches
 
 async function loadTf2Schema() {
+  if (tf2SchemaLoaded) return;
+  if (tf2SchemaFetching) return tf2SchemaFetching; // already in progress — wait for it
+  tf2SchemaFetching = _loadTf2Schema().finally(() => { tf2SchemaFetching = null; });
+  return tf2SchemaFetching;
+}
+
+async function _loadTf2Schema() {
   if (tf2SchemaLoaded) return;
 
   // Try disk cache first (only changes on TF2 updates)
