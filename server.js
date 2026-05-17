@@ -1780,7 +1780,6 @@ async function _syncInventoryListings() {
       const keys  = Math.floor(sellRef / keyPriceRef);
       const metal = snapToScrap(sellRef - keys * keyPriceRef);
       const priceStr = keys ? keys + ' keys ' + metal.toFixed(2) + ' ref' : metal.toFixed(2) + ' ref';
-      const cost = costs[item.assetid] || 0;
       console.log('[tf2-hub] sell-list ' + item.name + ': ' + sellRef.toFixed(2) + ' ref'
         + (cost ? ' (cost ' + cost.toFixed(2) + ' ref, margin ' + (sellRef - cost).toFixed(2) + ' ref)' : ' (cost unknown)')
         + ' bp=' + (getBpEntry(item)?.sell?.toFixed(2) ?? '—')
