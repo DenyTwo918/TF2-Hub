@@ -1263,9 +1263,17 @@ async function evaluateOffer(offer) {
 
   let action, reason;
 
+  // Detect gift-wrapped items — they show up as "Wrapped Gift" and can't be priced
+  const allUnknown = [...give.unknown, ...recv.unknown];
+  const hasWrappedGift = allUnknown.some(n => n === 'Wrapped Gift') ||
+    [...offer.itemsToReceive, ...offer.itemsToGive].some(i =>
+      (i.name || '') === 'Wrapped Gift' ||
+      (Array.isArray(i.tags) && i.tags.some(t => (t.internal_name || '').toLowerCase() === 'gift'))
+    );
+
   if (give.unknown.length || recv.unknown.length) {
     action = 'decline';
-    reason = 'unpriced items: ' + [...give.unknown, ...recv.unknown].slice(0, 3).join(', ');
+    reason = 'unpriced items: ' + allUnknown.slice(0, 3).join(', ');
   } else if (give.total === 0 && recv.total > 0) {
     action = acceptDonations ? 'accept' : 'decline';
     reason = 'donation — ' + recv.total.toFixed(2) + ' ref';
@@ -1372,6 +1380,10 @@ async function evaluateOffer(offer) {
     // counter was already sent inside tryCounterOffer
   } else if (action === 'decline') {
     appState.declined_today++;
+    if (hasWrappedGift) {
+      client.chatMessage(offer.partner,
+        '❌ I can\'t price gift-wrapped items — please unwrap the item first and resend the trade!');
+    }
     offer.decline(err => {
       if (err) console.error('[tf2-hub] decline error:', err.message);
       else console.log('[tf2-hub] offer', offer.id, 'declined');
