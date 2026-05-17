@@ -1898,6 +1898,23 @@ async function _syncInventoryListings() {
         buyRef = Math.max(0.11, maxBuyRef);
       }
       if (buyRef < 0.11) continue;
+
+      // Spread sanity: require IGetPrices sell - buy ≥ 2× minProfit so there's
+      // genuine room to resell. Thin-spread items (e.g. some MvM parts with only
+      // a 1-scrap spread) have too little buffer to survive stale data or any
+      // price movement; the bot would buy at market and never be able to relist
+      // above cost + minProfit before competitors undercut.
+      if (snap.bpSell !== null) {
+        const bpECheck = bpPriceList?.get(name);
+        if (bpECheck && (bpECheck.sell - bpECheck.buy) < minP * 2) {
+          console.log('[tf2-hub] skip buy ' + name + ': spread too thin ('
+            + bpECheck.buy.toFixed(2) + '→' + bpECheck.sell.toFixed(2)
+            + ', need ≥' + (minP * 2).toFixed(2) + ')');
+          skipLowConf++;
+          continue;
+        }
+      }
+
       const keys = Math.floor(buyRef / keyPriceRef);
       const metal = +(buyRef - keys * keyPriceRef).toFixed(2);
       const priceStr = keys ? keys + ' keys ' + metal + ' ref' : metal + ' ref';
